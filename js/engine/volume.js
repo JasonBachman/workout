@@ -19,22 +19,68 @@ const ANTAGONIST_PAIRS = [
 // ── Minimum contribution to count toward a muscle's set total ──
 const MIN_CONTRIBUTION = 0.3;
 
+// ── Effective set criteria ──
+const MIN_REPS = 5;
+const MAX_REPS = 30;
+const MIN_RPE = 7;
+const WARMUP_WEIGHT_THRESHOLD = 0.6; // below 60% of recent best = warm-up
+
 // ── Push/pull pattern groups ──
 const PUSH_PATTERNS = ['horizontal-push', 'vertical-push'];
 const PULL_PATTERNS = ['horizontal-pull', 'vertical-pull'];
 
 /**
+ * Filter sets to only "effective" sets that count toward hypertrophy volume.
+ * A set is effective if:
+ *   - Reps are in 5–30 range
+ *   - RPE >= 7 (if RPE was logged), OR weight >= 60% of recent best (if no RPE)
+ *
+ * @param {Array} sets - Set records to filter
+ * @param {Array} allSets - All historical sets (for computing recent best per exercise)
+ * @returns {Array} Only the effective sets
+ */
+export function filterEffectiveSets(sets, allSets) {
+  // Compute recent best weight per exercise (from all history)
+  const bestWeight = {};
+  for (const s of allSets) {
+    if (s.reps >= MIN_REPS && s.reps <= MAX_REPS) {
+      if (!bestWeight[s.exerciseId] || s.weight > bestWeight[s.exerciseId]) {
+        bestWeight[s.exerciseId] = s.weight;
+      }
+    }
+  }
+
+  return sets.filter((s) => {
+    // Rep range check
+    if (s.reps < MIN_REPS || s.reps > MAX_REPS) return false;
+
+    // Effort check: RPE if available, otherwise weight threshold
+    if (s.rpe !== null && s.rpe !== undefined) {
+      return s.rpe >= MIN_RPE;
+    }
+
+    // No RPE logged — use weight relative to recent best
+    const best = bestWeight[s.exerciseId];
+    if (!best || best === 0) return true; // no history, count it
+    return s.weight >= best * WARMUP_WEIGHT_THRESHOLD;
+  });
+}
+
+/**
  * Compute fractional weekly sets per muscle from logged sets.
+ * Automatically filters to effective sets only.
  *
  * @param {Array} sets - Logged set records within the window
  * @param {Array} exercises - All exercise records (for muscle contribution lookup)
+ * @param {Array} allSets - All historical sets (for warm-up detection). If omitted, no filtering.
  * @returns {Object.<string, number>} muscleId → fractional set count
  */
-export function computeWeeklyVolume(sets, exercises) {
+export function computeWeeklyVolume(sets, exercises, allSets = null) {
   const exerciseMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
+  const effective = allSets ? filterEffectiveSets(sets, allSets) : sets;
   const volume = {};
 
-  for (const s of sets) {
+  for (const s of effective) {
     const exercise = exerciseMap[s.exerciseId];
     if (!exercise) continue;
 

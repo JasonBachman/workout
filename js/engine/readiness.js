@@ -13,12 +13,17 @@
 
 import { estimateE1RM } from '../data/sets.js';
 
-// ── Recovery windows (hours) by muscle size ──
-const RECOVERY_HOURS = {
-  chest: 72, lats: 72, 'upper-back': 72, quads: 72, hamstrings: 72, glutes: 72,
-  'front-delts': 48, 'side-delts': 48, 'rear-delts': 48,
-  biceps: 48, triceps: 48, traps: 48, forearms: 48, calves: 48, abs: 48,
+// ── Base recovery windows (hours) by muscle size — scaled by volume + intensity ──
+const BASE_RECOVERY_HOURS = {
+  chest: 48, lats: 48, 'upper-back': 48, quads: 48, hamstrings: 48, glutes: 48,
+  'front-delts': 36, 'side-delts': 36, 'rear-delts': 36,
+  biceps: 36, triceps: 36, traps: 36, forearms: 36, calves: 36, abs: 36,
 };
+
+// Recovery scales: base + (volume_factor * sets) + (intensity_factor * avg_rpe_above_7)
+const RECOVERY_PER_SET = 4;       // +4 hours per effective set
+const RECOVERY_PER_RPE_POINT = 3; // +3 hours per avg RPE point above 7
+const MAX_RECOVERY_HOURS = 96;    // cap at 4 days
 
 // ── Acute:chronic ratio thresholds ──
 const ACR_FINE = 1.2;
@@ -42,24 +47,32 @@ export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()
   const exerciseMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
   const nowMs = asOf.getTime();
 
-  // Find the most recent timestamp each muscle was trained
-  const lastTrained = {};  // muscleId → timestamp (ms)
-  const recentVolume = {}; // muscleId → set count in last recovery window
+  // For each muscle, find the most recent training session and compute
+  // volume + intensity from that session to determine recovery needs.
+  // A "session" = all sets for that muscle on the same date.
+  const muscleSessionData = {}; // muscleId → { lastTimestamp, lastDate, sets: [] }
 
   for (const s of sets) {
     const exercise = exerciseMap[s.exerciseId];
     if (!exercise) continue;
 
-    for (const muscleId of Object.keys(exercise.muscles)) {
-      // Track last trained time
-      if (!lastTrained[muscleId] || s.timestamp > lastTrained[muscleId]) {
-        lastTrained[muscleId] = s.timestamp;
+    for (const [muscleId, fraction] of Object.entries(exercise.muscles)) {
+      if (fraction < 0.3) continue; // same threshold as volume engine
+
+      if (!muscleSessionData[muscleId]) {
+        muscleSessionData[muscleId] = { lastTimestamp: 0, lastDate: null, sets: [] };
       }
 
-      // Count volume in recovery window
-      const recoveryMs = (RECOVERY_HOURS[muscleId] ?? 48) * 3600000;
-      if (nowMs - s.timestamp <= recoveryMs) {
-        recentVolume[muscleId] = (recentVolume[muscleId] ?? 0) + (exercise.muscles[muscleId] ?? 0);
+      const md = muscleSessionData[muscleId];
+
+      if (s.timestamp > md.lastTimestamp) {
+        // New most-recent session — reset
+        md.lastTimestamp = s.timestamp;
+        md.lastDate = s.date;
+        md.sets = [{ fraction, rpe: s.rpe, weight: s.weight, reps: s.reps }];
+      } else if (s.date === md.lastDate) {
+        // Same session day — add to it
+        md.sets.push({ fraction, rpe: s.rpe, weight: s.weight, reps: s.reps });
       }
     }
   }
@@ -68,25 +81,33 @@ export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()
 
   for (const muscle of muscles) {
     const { id } = muscle;
-    const recoveryHrs = RECOVERY_HOURS[id] ?? 48;
-    const last = lastTrained[id];
+    const baseHrs = BASE_RECOVERY_HOURS[id] ?? 36;
+    const md = muscleSessionData[id];
 
-    if (!last) {
-      // Never trained — fully recovered
-      result[id] = { score: 100, hoursSinceTrained: null, recoveryHours: recoveryHrs };
+    if (!md || md.lastTimestamp === 0) {
+      result[id] = { score: 100, hoursSinceTrained: null, recoveryHours: baseHrs };
       continue;
     }
 
-    const hoursSince = (nowMs - last) / 3600000;
+    // Compute effective volume for this session
+    const effectiveSets = md.sets.reduce((sum, s) => sum + s.fraction, 0);
+
+    // Compute average RPE (only from sets that have RPE)
+    const rpeValues = md.sets.filter((s) => s.rpe != null).map((s) => s.rpe);
+    const avgRpe = rpeValues.length > 0
+      ? rpeValues.reduce((a, b) => a + b, 0) / rpeValues.length
+      : 7.5; // assume moderate if no RPE logged
+
+    // Scale recovery window: base + volume factor + intensity factor
+    const volumeAddon = effectiveSets * RECOVERY_PER_SET;
+    const intensityAddon = Math.max(0, avgRpe - 7) * RECOVERY_PER_RPE_POINT;
+    const recoveryHrs = Math.min(MAX_RECOVERY_HOURS, baseHrs + volumeAddon + intensityAddon);
+
+    const hoursSince = (nowMs - md.lastTimestamp) / 3600000;
     const recoveryFraction = Math.min(hoursSince / recoveryHrs, 1);
+    const score = Math.max(0, Math.min(100, Math.round(recoveryFraction * 100)));
 
-    // Penalize if volume in recovery window is high (more than 6 sets = heavy session)
-    const vol = recentVolume[id] ?? 0;
-    const volumePenalty = vol > 6 ? Math.min((vol - 6) * 3, 20) : 0;
-
-    const score = Math.max(0, Math.min(100, Math.round(recoveryFraction * 100 - volumePenalty)));
-
-    result[id] = { score, hoursSinceTrained: Math.round(hoursSince), recoveryHours: recoveryHrs };
+    result[id] = { score, hoursSinceTrained: Math.round(hoursSince), recoveryHours: Math.round(recoveryHrs) };
   }
 
   return result;

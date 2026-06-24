@@ -13,6 +13,8 @@ import { getAllSets } from '../data/sets.js';
 import { recommend } from '../engine/recommend.js';
 import { computeWeeklyVolume, evaluateVolume, filterToWindow, checkAntagonistBalance } from '../engine/volume.js';
 import { computeReadiness } from '../engine/readiness.js';
+import { analyzeProgression } from '../engine/progression.js';
+import { getActiveProgram } from '../data/programs.js';
 import { renderBodyMap } from './bodymap.js';
 
 let container = null;
@@ -37,7 +39,7 @@ export const homePage = {
 
     // Weekly volume
     const weeklySets = filterToWindow(allSets, 7, now);
-    const volume = computeWeeklyVolume(weeklySets, exercises);
+    const volume = computeWeeklyVolume(weeklySets, exercises, allSets);
     const volumeStatus = evaluateVolume(volume, landmarks);
 
     // Antagonist balance
@@ -46,10 +48,15 @@ export const homePage = {
     // Recommendation
     const rec = recommend({ sets: allSets, exercises, muscles, landmarks }, { asOf: now });
 
+    // Progression analysis
+    const program = await getActiveProgram(db);
+    const progressionData = analyzeProgression(program, allSets);
+    const exMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
+
     // Muscle name lookup
     const muscleNames = Object.fromEntries(muscles.map((m) => [m.id, m.name]));
 
-    render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets });
+    render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap });
   },
 
   unmount() {
@@ -57,7 +64,7 @@ export const homePage = {
   },
 };
 
-function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets }) {
+function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap }) {
   if (!container) return;
 
   const neglected = volumeStatus.filter((v) => v.status === 'under');
@@ -197,6 +204,9 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
         </div>
       ` : ''}
 
+      <!-- Progression Adjustments -->
+      ${renderProgressionCard(progressionData, exMap)}
+
     </div>
   `;
 
@@ -214,6 +224,36 @@ function showInstallPrompt() {
     || navigator.standalone === true;
   const dismissed = localStorage.getItem('install-dismissed');
   return isIOS && !isStandalone && !dismissed;
+}
+
+function renderProgressionCard(progressionData, exMap) {
+  // Only show exercises that need attention (not 'keep' or 'insufficient')
+  const actionable = progressionData.filter((p) =>
+    p.recommendation.action !== 'keep' && p.rate.trend !== 'insufficient'
+  );
+
+  if (actionable.length === 0) return '';
+
+  return `
+    <div class="card">
+      <div class="card-header">Progression Updates</div>
+      <div class="flex flex-col gap-3 mt-2">
+        ${actionable.map((p) => {
+          const name = exMap[p.exerciseId]?.name ?? p.exerciseId;
+          const r = p.recommendation;
+          const actionColor = r.action === 'deload' ? 'var(--overworked)'
+            : r.action === 'reduce' ? 'var(--recovering)'
+            : 'var(--text-secondary)';
+          return `
+            <div>
+              <div style="font-weight:600;">${name}</div>
+              <div class="text-sm" style="color:${actionColor};">${r.reason}</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
 }
 
 function formatDate(d) {

@@ -233,7 +233,7 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
 
   // 1. Weekly volume from rolling 7-day window
   const weeklySets = filterToWindow(allSets, 7, asOf);
-  const volume = computeWeeklyVolume(weeklySets, exercises);
+  const volume = computeWeeklyVolume(weeklySets, exercises, allSets);
   const volumeStatus = evaluateVolume(volume, landmarks);
 
   // 2. Readiness (uses full history for stall detection, ACR)

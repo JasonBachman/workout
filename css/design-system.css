@@ -75,6 +75,8 @@
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -82,9 +84,22 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
-  min-height: 100dvh;
+  height: 100%;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  padding-bottom: 80px; /* room for bottom nav */
+}
+
+/* ── App Shell ── */
+#app {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 64px; /* nav height */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* ── Cards ── */
@@ -289,6 +304,7 @@ body {
   max-width: 480px;
   margin: 0 auto;
   padding: var(--sp-4);
+  padding-bottom: var(--sp-8);
 }
 
 .flex { display: flex; }
@@ -312,10 +328,6 @@ body {
 .text-right { text-align: right; }
 
 /* ── Page Transitions ── */
-#app {
-  animation: fadeIn 0.2s var(--ease-out);
-}
-
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }

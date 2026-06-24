@@ -1,4 +1,4 @@
-const CACHE_NAME = 'strength-v6';
+const CACHE_NAME = 'strength-v7';
 
 // Relative paths — resolved against SW scope at install time
 const PRECACHE_URLS = [
@@ -17,6 +17,7 @@ const PRECACHE_URLS = [
   'js/engine/volume.js',
   'js/engine/readiness.js',
   'js/engine/recommend.js',
+  'js/engine/progression.js',
   'js/ui/router.js',
   'js/ui/home.js',
   'js/ui/log.js',

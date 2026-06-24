@@ -197,6 +197,7 @@ function bindBackupEvents() {
     a.download = `strength-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    localStorage.setItem('last-export-time', Date.now().toString());
   });
 
   container.querySelector('#btn-import')?.addEventListener('click', () => {

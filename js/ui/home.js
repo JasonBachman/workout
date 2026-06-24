@@ -79,6 +79,18 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
         <p class="text-sm text-muted">${formatDate(new Date())}</p>
       </div>
 
+      <!-- Backup Reminder -->
+      ${showBackupReminder() ? `
+        <div class="install-banner" id="backup-banner" style="border-left: 3px solid var(--recovering);">
+          <div style="flex:1;">
+            <div style="font-weight:600;font-size:var(--text-sm);">Back up your data</div>
+            <div class="text-sm text-muted">It's been over 5 days since your last export.</div>
+          </div>
+          <a href="#/more" class="btn btn-sm btn-secondary">Backup</a>
+          <button class="btn btn-ghost btn-sm" id="dismiss-backup">&times;</button>
+        </div>
+      ` : ''}
+
       <!-- iOS Install Prompt -->
       ${showInstallPrompt() ? `
         <div class="install-banner" id="install-banner">
@@ -215,6 +227,29 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
     localStorage.setItem('install-dismissed', '1');
     container.querySelector('#install-banner')?.remove();
   });
+
+  // Dismiss backup reminder (snooze 3 days)
+  container.querySelector('#dismiss-backup')?.addEventListener('click', () => {
+    localStorage.setItem('backup-snoozed', Date.now().toString());
+    container.querySelector('#backup-banner')?.remove();
+  });
+}
+
+function showBackupReminder() {
+  const lastExport = localStorage.getItem('last-export-time');
+  const snoozed = localStorage.getItem('backup-snoozed');
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || navigator.standalone === true;
+
+  // Don't nag if installed as PWA (no 7-day eviction risk)
+  if (isStandalone) return false;
+
+  // Snoozed for 3 days
+  if (snoozed && Date.now() - parseInt(snoozed, 10) < 3 * 24 * 3600000) return false;
+
+  // Never exported, or exported more than 5 days ago
+  if (!lastExport) return true;
+  return Date.now() - parseInt(lastExport, 10) > 5 * 24 * 3600000;
 }
 
 function showInstallPrompt() {

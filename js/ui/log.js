@@ -116,23 +116,11 @@ function renderExercisePicker() {
         </div>
       ` : ''}
 
-      <div class="flex flex-col gap-3">
-        ${Object.entries(groups).map(([pattern, exs]) => `
-          <div>
-            <span class="card-header">${pattern}</span>
-            <div class="flex flex-col gap-2 mt-2">
-              ${exs.map((ex) => `
-                <button class="card exercise-pick" data-id="${ex.id}" style="cursor:pointer;text-align:left;">
-                  <div style="font-weight:600;">${ex.name}</div>
-                  <div class="text-sm text-muted">${ex.equipment} &middot; ${Object.keys(ex.muscles).map((m) => m.replace(/-/g, ' ')).join(', ')}</div>
-                </button>
-              `).join('')}
-            </div>
-          </div>
-        `).join('')}
-      </div>
+      <div id="exercise-list" class="flex flex-col gap-3"></div>
     </div>
   `;
+
+  updateExerciseList(filtered);
 
   // Event listeners
   container.querySelector('#log-date')?.addEventListener('change', async (e) => {
@@ -144,10 +132,43 @@ function renderExercisePicker() {
 
   container.querySelector('#exercise-search')?.addEventListener('input', (e) => {
     state.searchQuery = e.target.value;
-    render();
+    const f = state.searchQuery
+      ? state.exercises.filter((ex) => ex.name.toLowerCase().includes(state.searchQuery.toLowerCase()))
+      : state.exercises;
+    updateExerciseList(f);
   });
 
-  container.querySelectorAll('.exercise-pick, .exercise-quick').forEach((btn) => {
+  container.querySelectorAll('.exercise-quick').forEach((btn) => {
+    btn.addEventListener('click', () => selectExercise(btn.dataset.id));
+  });
+}
+
+function updateExerciseList(filtered) {
+  const listEl = container?.querySelector('#exercise-list');
+  if (!listEl) return;
+
+  const groups = {};
+  for (const ex of filtered) {
+    const key = ex.pattern.replace(/-/g, ' ');
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(ex);
+  }
+
+  listEl.innerHTML = Object.entries(groups).map(([pattern, exs]) => `
+    <div>
+      <span class="card-header">${pattern}</span>
+      <div class="flex flex-col gap-2 mt-2">
+        ${exs.map((ex) => `
+          <button class="card exercise-pick" data-id="${ex.id}" style="cursor:pointer;text-align:left;">
+            <div style="font-weight:600;">${ex.name}</div>
+            <div class="text-sm text-muted">${ex.equipment} &middot; ${Object.keys(ex.muscles).map((m) => m.replace(/-/g, ' ')).join(', ')}</div>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  listEl.querySelectorAll('.exercise-pick').forEach((btn) => {
     btn.addEventListener('click', () => selectExercise(btn.dataset.id));
   });
 }

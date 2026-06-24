@@ -37,4 +37,11 @@ async function init() {
   }, ctx);
 }
 
-init();
+init().catch((err) => {
+  document.getElementById('app').innerHTML = `
+    <div style="padding:24px;color:#f87171;font-family:monospace;font-size:14px;">
+      <p><strong>Init failed:</strong></p>
+      <pre>${err?.message ?? err}\n${err?.stack ?? ''}</pre>
+    </div>
+  `;
+});

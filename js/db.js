@@ -32,10 +32,16 @@ function upgrade(db) {
   }
 }
 
-function promisify(request) {
+function promisify(requestOrTx) {
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    if (requestOrTx instanceof IDBTransaction) {
+      requestOrTx.oncomplete = () => resolve();
+      requestOrTx.onerror = () => reject(requestOrTx.error);
+      requestOrTx.onabort = () => reject(requestOrTx.error ?? new Error('Transaction aborted'));
+    } else {
+      requestOrTx.onsuccess = () => resolve(requestOrTx.result);
+      requestOrTx.onerror = () => reject(requestOrTx.error);
+    }
   });
 }
 

@@ -5,7 +5,7 @@
  * Shows last session's numbers for reference. Prefills from active program.
  */
 
-import { logSet, getSetsByDate, getSetsByExercise, estimateE1RM } from '../data/sets.js';
+import { logSet, getSetsByDate, getSetsByExercise, deleteSet, estimateE1RM } from '../data/sets.js';
 import { getAllExercises } from '../data/exercises.js';
 import { getActiveProgram } from '../data/programs.js';
 import { showToast } from './toast.js';
@@ -198,6 +198,7 @@ async function selectExercise(exerciseId) {
 function renderSetEntry() {
   const ex = state.selectedExercise;
   const todayForEx = state.todaySets.filter((s) => s.exerciseId === ex.id);
+  const isToday = state.date === new Date().toISOString().slice(0, 10);
 
   container.innerHTML = `
     <div class="container flex flex-col gap-4" style="padding-top: var(--sp-4);">
@@ -221,11 +222,14 @@ function renderSetEntry() {
 
       ${todayForEx.length > 0 ? `
         <div class="card">
-          <div class="card-header">Today &mdash; ${todayForEx.length} sets</div>
+          <div class="card-header">${isToday ? 'Today' : formatDateShort(state.date)} &mdash; ${todayForEx.length} sets</div>
           <div class="flex flex-col gap-1">
             ${todayForEx.map((s, i) => `
-              <div class="text-sm">
-                Set ${i + 1}: <span class="font-mono">${s.weight} lbs × ${s.reps}</span>${s.rpe ? ` @ RPE ${s.rpe}` : ''}
+              <div class="flex items-center justify-between">
+                <div class="text-sm">
+                  Set ${i + 1}: <span class="font-mono">${s.weight} lbs × ${s.reps}</span>${s.rpe ? ` @ RPE ${s.rpe}` : ''}
+                </div>
+                <button class="btn btn-ghost btn-sm delete-set" data-set-id="${s.id}" style="min-height:28px;padding:2px 8px;color:var(--text-muted);">&times;</button>
               </div>
             `).join('')}
           </div>
@@ -268,6 +272,16 @@ function renderSetEntry() {
   container.querySelector('#back-btn')?.addEventListener('click', () => {
     state.selectedExercise = null;
     render();
+  });
+
+  container.querySelectorAll('.delete-set').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const setId = btn.dataset.setId;
+      await deleteSet(db, setId);
+      state.todaySets = state.todaySets.filter((s) => s.id !== setId);
+      showToast('Set deleted');
+      render();
+    });
   });
 
   container.querySelector('#input-weight')?.addEventListener('input', (e) => {

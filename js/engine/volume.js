@@ -16,6 +16,9 @@ const ANTAGONIST_PAIRS = [
   ['quads', 'hamstrings'],
 ];
 
+// ── Minimum contribution to count toward a muscle's set total ──
+const MIN_CONTRIBUTION = 0.3;
+
 // ── Push/pull pattern groups ──
 const PUSH_PATTERNS = ['horizontal-push', 'vertical-push'];
 const PULL_PATTERNS = ['horizontal-pull', 'vertical-pull'];
@@ -36,7 +39,9 @@ export function computeWeeklyVolume(sets, exercises) {
     if (!exercise) continue;
 
     for (const [muscleId, fraction] of Object.entries(exercise.muscles)) {
-      volume[muscleId] = (volume[muscleId] ?? 0) + fraction;
+      if (fraction >= MIN_CONTRIBUTION) {
+        volume[muscleId] = (volume[muscleId] ?? 0) + fraction;
+      }
     }
   }
 

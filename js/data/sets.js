@@ -29,14 +29,14 @@ export function estimateE1RM(weight, reps) {
 }
 
 /** @param {import('../db.js').DB} db */
-export async function logSet(db, { exerciseId, programId = null, weight, reps, rpe = null, notes = '' }) {
+export async function logSet(db, { exerciseId, programId = null, date = null, weight, reps, rpe = null, notes = '' }) {
   const now = new Date();
   const record = {
     id: makeId(),
     exerciseId,
     programId,
-    date: now.toISOString().slice(0, 10),
-    timestamp: now.getTime(),
+    date: date ?? now.toISOString().slice(0, 10),
+    timestamp: date ? new Date(date + 'T12:00:00').getTime() : now.getTime(),
     weight,
     reps,
     rpe,

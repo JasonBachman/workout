@@ -22,6 +22,7 @@ let state = {
   rpe: null,
   searchQuery: '',
   program: null,
+  date: new Date().toISOString().slice(0, 10),
 };
 
 let container = null;
@@ -33,7 +34,8 @@ export const logPage = {
     db = ctx.db;
 
     state.exercises = await getAllExercises(db);
-    state.todaySets = await getSetsByDate(db, new Date().toISOString().slice(0, 10));
+    state.date = new Date().toISOString().slice(0, 10);
+    state.todaySets = await getSetsByDate(db, state.date);
     state.program = await getActiveProgram(db);
     state.selectedExercise = null;
     state.searchQuery = '';
@@ -77,16 +79,26 @@ function renderExercisePicker() {
     .map((id) => state.exercises.find((e) => e.id === id))
     .filter(Boolean);
 
+  const isToday = state.date === new Date().toISOString().slice(0, 10);
+  const dateLabel = isToday ? 'Today' : formatDateShort(state.date);
+
   container.innerHTML = `
     <div class="container flex flex-col gap-4" style="padding-top: var(--sp-4);">
-      <h2 style="font-size: var(--text-xl); font-weight: 700;">Log Workout</h2>
+      <div class="flex items-center justify-between">
+        <h2 style="font-size: var(--text-xl); font-weight: 700;">Log Workout</h2>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">${dateLabel}</span>
+          <input type="date" id="log-date" class="input" value="${state.date}"
+            style="min-height:36px;width:auto;padding:var(--sp-2) var(--sp-3);font-size:var(--text-sm);">
+        </div>
+      </div>
 
       <input class="input" type="text" id="exercise-search"
         placeholder="Search exercises..." value="${state.searchQuery}">
 
       ${todayExercises.length > 0 ? `
         <div class="flex flex-col gap-2">
-          <span class="card-header">Continue today</span>
+          <span class="card-header">Continue ${dateLabel}</span>
           <div class="flex gap-2" style="flex-wrap:wrap;">
             ${todayExercises.map((ex) => `
               <button class="btn btn-secondary btn-sm exercise-quick" data-id="${ex.id}">
@@ -99,7 +111,7 @@ function renderExercisePicker() {
 
       ${state.todaySets.length > 0 ? `
         <div class="card">
-          <div class="card-header">Today &mdash; ${state.todaySets.length} sets</div>
+          <div class="card-header">${dateLabel} &mdash; ${state.todaySets.length} sets</div>
           ${renderTodaySummary()}
         </div>
       ` : ''}
@@ -123,6 +135,13 @@ function renderExercisePicker() {
   `;
 
   // Event listeners
+  container.querySelector('#log-date')?.addEventListener('change', async (e) => {
+    state.date = e.target.value;
+    state.todaySets = await getSetsByDate(db, state.date);
+    state.selectedExercise = null;
+    render();
+  });
+
   container.querySelector('#exercise-search')?.addEventListener('input', (e) => {
     state.searchQuery = e.target.value;
     render();
@@ -255,9 +274,11 @@ function renderSetEntry() {
 
     if (!weight || weight <= 0 || !reps || reps <= 0) return;
 
+    const isToday = state.date === new Date().toISOString().slice(0, 10);
     const record = await logSet(db, {
       exerciseId: ex.id,
       programId: state.program?.id ?? null,
+      date: isToday ? null : state.date,
       weight,
       reps,
       rpe: state.rpe,
@@ -285,4 +306,9 @@ function renderTodaySummary() {
     const name = ex?.name ?? exId;
     return `<div class="text-sm">${name}: <span class="font-mono">${sets.length} sets</span></div>`;
   }).join('');
+}
+
+function formatDateShort(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

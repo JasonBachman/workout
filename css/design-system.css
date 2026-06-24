@@ -92,10 +92,10 @@ body {
 /* ── App Shell ── */
 #app {
   position: fixed;
-  top: 0;
+  top: env(safe-area-inset-top, 0);
   left: 0;
   right: 0;
-  bottom: 64px; /* nav height */
+  bottom: calc(64px + env(safe-area-inset-bottom, 0));
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -243,11 +243,12 @@ body {
   right: 0;
   display: flex;
   justify-content: space-around;
-  align-items: center;
-  height: 64px;
+  align-items: flex-start;
+  height: calc(64px + env(safe-area-inset-bottom, 0));
+  padding-top: 8px;
+  padding-bottom: env(safe-area-inset-bottom, 0);
   background: var(--bg-secondary);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding-bottom: env(safe-area-inset-bottom, 0);
   z-index: 100;
 }
 

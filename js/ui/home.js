@@ -79,30 +79,6 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
         <p class="text-sm text-muted">${formatDate(new Date())}</p>
       </div>
 
-      <!-- Backup Reminder -->
-      ${showBackupReminder() ? `
-        <div class="install-banner" id="backup-banner" style="border-left: 3px solid var(--recovering);">
-          <div style="flex:1;">
-            <div style="font-weight:600;font-size:var(--text-sm);">Back up your data</div>
-            <div class="text-sm text-muted">It's been over 5 days since your last export.</div>
-          </div>
-          <a href="#/more" class="btn btn-sm btn-secondary">Backup</a>
-          <button class="btn btn-ghost btn-sm" id="dismiss-backup">&times;</button>
-        </div>
-      ` : ''}
-
-      <!-- iOS Install Prompt -->
-      ${showInstallPrompt() ? `
-        <div class="install-banner" id="install-banner">
-          <span class="install-banner-icon">&#128241;</span>
-          <div style="flex:1;">
-            <div style="font-weight:600;font-size:var(--text-sm);">Install this app</div>
-            <div class="text-sm text-muted">Tap Share &#8594; Add to Home Screen for the full experience.</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" id="dismiss-install">&times;</button>
-        </div>
-      ` : ''}
-
       <!-- Systemic status -->
       ${readiness.systemic.fatigued ? `
         <div class="card" style="border-left: 3px solid var(--overworked);">
@@ -222,43 +198,6 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
     </div>
   `;
 
-  // Dismiss install banner
-  container.querySelector('#dismiss-install')?.addEventListener('click', () => {
-    localStorage.setItem('install-dismissed', '1');
-    container.querySelector('#install-banner')?.remove();
-  });
-
-  // Dismiss backup reminder (snooze 3 days)
-  container.querySelector('#dismiss-backup')?.addEventListener('click', () => {
-    localStorage.setItem('backup-snoozed', Date.now().toString());
-    container.querySelector('#backup-banner')?.remove();
-  });
-}
-
-function showBackupReminder() {
-  const lastExport = localStorage.getItem('last-export-time');
-  const snoozed = localStorage.getItem('backup-snoozed');
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-    || navigator.standalone === true;
-
-  // Don't nag if installed as PWA (no 7-day eviction risk)
-  if (isStandalone) return false;
-
-  // Snoozed for 3 days
-  if (snoozed && Date.now() - parseInt(snoozed, 10) < 3 * 24 * 3600000) return false;
-
-  // Never exported, or exported more than 5 days ago
-  if (!lastExport) return true;
-  return Date.now() - parseInt(lastExport, 10) > 5 * 24 * 3600000;
-}
-
-function showInstallPrompt() {
-  // Show on iOS Safari when not already installed as PWA
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-    || navigator.standalone === true;
-  const dismissed = localStorage.getItem('install-dismissed');
-  return isIOS && !isStandalone && !dismissed;
 }
 
 function renderProgressionCard(progressionData, exMap) {

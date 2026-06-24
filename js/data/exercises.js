@@ -82,6 +82,41 @@ export const SEED_EXERCISES = [
   { id: 'wrist-curl',          name: 'Wrist Curl',              equipment: 'dumbbell',   pattern: 'isolation',        muscles: { forearms: 1.0 } },
   { id: 'hanging-leg-raise',   name: 'Hanging Leg Raise',       equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
   { id: 'cable-crunch',        name: 'Cable Crunch',            equipment: 'cable',      pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'plank',               name: 'Plank',                   equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'russian-twist',       name: 'Russian Twist',           equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'ab-wheel',            name: 'Ab Wheel Rollout',        equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'bicycle-crunch',      name: 'Bicycle Crunch',          equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'dead-bug',            name: 'Dead Bug',                equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 1.0 } },
+  { id: 'mountain-climber',    name: 'Mountain Climber',        equipment: 'bodyweight', pattern: 'isolation',        muscles: { abs: 0.8, quads: 0.3 } },
+
+  // ── Extra: Chest ──
+  { id: 'dip',                 name: 'Dip',                     equipment: 'bodyweight', pattern: 'horizontal-push', muscles: { chest: 0.7, triceps: 0.8, 'front-delts': 0.4 } },
+  { id: 'decline-bench',       name: 'Decline Bench Press',     equipment: 'barbell',    pattern: 'horizontal-push', muscles: { chest: 1.0, triceps: 0.5, 'front-delts': 0.3 } },
+
+  // ── Extra: Back ──
+  { id: 'chest-supported-row', name: 'Chest Supported Row',     equipment: 'dumbbell',   pattern: 'horizontal-pull', muscles: { 'upper-back': 0.9, lats: 0.6, 'rear-delts': 0.5, biceps: 0.4 } },
+  { id: 'meadows-row',         name: 'Meadows Row',             equipment: 'barbell',    pattern: 'horizontal-pull', muscles: { lats: 0.9, 'upper-back': 0.5, 'rear-delts': 0.4, biceps: 0.4 } },
+  { id: 'straight-arm-pulldown', name: 'Straight Arm Pulldown', equipment: 'cable',      pattern: 'vertical-pull',   muscles: { lats: 1.0, abs: 0.3 } },
+
+  // ── Extra: Shoulders ──
+  { id: 'machine-lateral-raise', name: 'Machine Lateral Raise', equipment: 'machine',    pattern: 'isolation',        muscles: { 'side-delts': 1.0 } },
+  { id: 'front-raise',         name: 'Front Raise',             equipment: 'dumbbell',   pattern: 'isolation',        muscles: { 'front-delts': 1.0 } },
+  { id: 'cable-reverse-fly',   name: 'Cable Reverse Fly',       equipment: 'cable',      pattern: 'isolation',        muscles: { 'rear-delts': 1.0, 'upper-back': 0.3 } },
+
+  // ── Extra: Arms ──
+  { id: 'preacher-curl',       name: 'Preacher Curl',           equipment: 'barbell',    pattern: 'isolation',        muscles: { biceps: 1.0 } },
+  { id: 'incline-db-curl',     name: 'Incline DB Curl',         equipment: 'dumbbell',   pattern: 'isolation',        muscles: { biceps: 1.0 } },
+  { id: 'dip-tricep',          name: 'Tricep Dip (Bench)',      equipment: 'bodyweight', pattern: 'isolation',        muscles: { triceps: 1.0 } },
+
+  // ── Extra: Legs ──
+  { id: 'sumo-deadlift',       name: 'Sumo Deadlift',           equipment: 'barbell',    pattern: 'hip-hinge',       muscles: { glutes: 1.0, hamstrings: 0.7, quads: 0.4, 'upper-back': 0.3 } },
+  { id: 'reverse-lunge',       name: 'Reverse Lunge',           equipment: 'dumbbell',   pattern: 'lunge',           muscles: { quads: 0.8, glutes: 0.7, hamstrings: 0.3 } },
+  { id: 'seated-calf-raise',   name: 'Seated Calf Raise',       equipment: 'machine',    pattern: 'isolation',        muscles: { calves: 1.0 } },
+  { id: 'hip-adductor',        name: 'Hip Adductor',            equipment: 'machine',    pattern: 'isolation',        muscles: { glutes: 0.7, hamstrings: 0.3 } },
+  { id: 'hip-abductor',        name: 'Hip Abductor',            equipment: 'machine',    pattern: 'isolation',        muscles: { glutes: 0.8 } },
+
+  // ── Extra: Traps / Upper Back ──
+  { id: 'db-shrug',            name: 'Dumbbell Shrug',          equipment: 'dumbbell',   pattern: 'isolation',        muscles: { traps: 1.0 } },
 ];
 
 /** @param {import('../db.js').DB} db */
@@ -116,5 +151,12 @@ export async function seedExercises(db) {
   const existing = await db.getAll(STORE);
   if (existing.length === 0) {
     await db.putAll(STORE, SEED_EXERCISES);
+  } else {
+    // Add any new exercises that don't exist yet
+    const existingIds = new Set(existing.map((e) => e.id));
+    const newExercises = SEED_EXERCISES.filter((e) => !existingIds.has(e.id));
+    if (newExercises.length > 0) {
+      await db.putAll(STORE, newExercises);
+    }
   }
 }

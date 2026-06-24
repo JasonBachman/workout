@@ -11,7 +11,7 @@ async function init() {
   // Register service worker
   if ('serviceWorker' in navigator) {
     try {
-      await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.register('../sw.js');
     } catch (err) {
       console.error('SW registration failed:', err);
     }

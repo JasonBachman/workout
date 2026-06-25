@@ -91,6 +91,7 @@ function renderExercisePicker() {
         <div class="flex items-center gap-2">
           <span class="text-sm text-muted">${dateLabel}</span>
           <input type="date" id="log-date" class="input" value="${state.date}"
+            max="${new Date().toISOString().slice(0, 10)}"
             style="min-height:36px;width:auto;padding:var(--sp-2) var(--sp-3);font-size:var(--text-sm);">
         </div>
       </div>
@@ -316,10 +317,14 @@ function renderSetEntry() {
   container.querySelectorAll('.delete-set').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const setId = btn.dataset.setId;
-      await deleteSet(db, setId);
-      state.todaySets = state.todaySets.filter((s) => s.id !== setId);
-      showToast('Set deleted');
-      render();
+      try {
+        await deleteSet(db, setId);
+        state.todaySets = state.todaySets.filter((s) => s.id !== setId);
+        showToast('Set deleted');
+        render();
+      } catch (err) {
+        showToast('Delete failed');
+      }
     });
   });
 
@@ -346,7 +351,7 @@ function renderSetEntry() {
     const weight = parseFloat(state.weight);
     const reps = parseInt(state.reps, 10);
 
-    if (!weight || weight <= 0 || !reps || reps <= 0) return;
+    if (!weight || weight <= 0 || weight > 1500 || !reps || reps <= 0 || reps > 100) return;
 
     const isToday = state.date === new Date().toISOString().slice(0, 10);
     const record = await logSet(db, {

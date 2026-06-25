@@ -164,7 +164,7 @@ export function checkAntagonistBalance(volume) {
     if (va === 0 && vb === 0) continue;
 
     const max = Math.max(va, vb);
-    const min = Math.max(va, vb) === va ? vb : va;
+    const min = Math.min(va, vb);
 
     if (min === 0 && max > 0) {
       warnings.push({
@@ -227,7 +227,7 @@ export function checkPushPullBalance(sets, exercises) {
  */
 export function filterToWindow(sets, windowDays = 7, asOf = new Date()) {
   const cutoff = new Date(asOf);
-  cutoff.setDate(cutoff.getDate() - windowDays);
+  cutoff.setDate(cutoff.getDate() - windowDays + 1); // -6 for 7-day window (today + 6 prior)
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   const asOfStr = asOf.toISOString().slice(0, 10);
 

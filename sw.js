@@ -1,4 +1,4 @@
-const CACHE_NAME = 'strength-v15';
+const CACHE_NAME = 'strength-v16';
 
 // Relative paths — resolved against SW scope at install time
 const PRECACHE_URLS = [

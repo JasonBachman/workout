@@ -58,7 +58,7 @@ export const homePage = {
     // Muscle name lookup
     const muscleNames = Object.fromEntries(muscles.map((m) => [m.id, m.name]));
 
-    render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap });
+    render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap, ctx, exercises });
   },
 
   unmount() {
@@ -66,7 +66,7 @@ export const homePage = {
   },
 };
 
-function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap }) {
+function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, weeklySets, progressionData, exMap, ctx, exercises }) {
   if (!container) return;
 
   const neglected = volumeStatus.filter((v) => v.status === 'under');
@@ -122,7 +122,7 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
               <span class="font-mono" style="font-weight:600;">${rec.totalSets} sets</span>
             </div>
           </div>
-          <a href="#/log" class="btn btn-primary w-full mt-4">Start Workout</a>
+          <button class="btn btn-primary w-full mt-4" id="start-workout-btn">Start Workout</button>
         ` : `
           <div class="text-sm text-muted mt-2">
             ${readiness.systemic.fatigued
@@ -200,6 +200,16 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
     </div>
   `;
 
+  // Start Workout — store picks on context and navigate to log
+  container.querySelector('#start-workout-btn')?.addEventListener('click', () => {
+    ctx.sessionQueue = rec.picks.map((p) => ({
+      exercise: p.exercise,
+      sets: p.sets,
+      reason: p.reason,
+    }));
+    ctx.allExercises = exercises;
+    location.hash = '#/log';
+  });
 }
 
 function renderProgressionCard(progressionData, exMap) {

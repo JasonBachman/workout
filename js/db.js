@@ -8,7 +8,7 @@
  */
 
 const DB_NAME = 'strength-tracker';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   exercises: { keyPath: 'id', indexes: [{ name: 'byPattern', keyPath: 'pattern' }, { name: 'byEquipment', keyPath: 'equipment' }] },
@@ -17,6 +17,7 @@ const STORES = {
   programs: { keyPath: 'id' },
   sets: { keyPath: 'id', indexes: [{ name: 'byDate', keyPath: 'date' }, { name: 'byExercise', keyPath: 'exerciseId' }, { name: 'byProgram', keyPath: 'programId' }] },
   metrics: { keyPath: 'id', indexes: [{ name: 'byDate', keyPath: 'date' }, { name: 'byType', keyPath: 'type' }] },
+  goals: { keyPath: 'muscleId' },
 };
 
 function upgrade(db) {

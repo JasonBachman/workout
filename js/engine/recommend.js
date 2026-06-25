@@ -11,6 +11,7 @@
 
 import { computeWeeklyVolume, evaluateVolume, filterToWindow } from './volume.js';
 import { computeReadiness } from './readiness.js';
+import { computeMusclePriority, countMuscleSessionDays, deriveIdealFrequency } from './priority.js';
 
 // ── Defaults ──
 const DEFAULT_TARGET_SETS = 20;
@@ -19,46 +20,48 @@ const MAX_TARGET_SETS = 22;
 const SETS_PER_EXERCISE = 3; // assumed working sets per exercise picked
 
 /**
- * Score each muscle by how much it needs work.
- * Higher score = higher priority for training today.
+ * Score each muscle using multi-factor priority system.
  *
  * @param {Array} volumeStatus - From evaluateVolume()
  * @param {Object} readinessData - From computeReadiness()
+ * @param {Object} extra
+ * @param {Object} extra.weeklyVolume - muscleId → sets
+ * @param {Array} extra.weeklySets - sets in the 7-day window
+ * @param {Array} extra.exercises - all exercises
+ * @param {Object} extra.goalMap - muscleId → 'high'|'medium'|'low'
+ * @param {Date} extra.asOf
  * @returns {Object.<string, {priority: number, reason: string}>}
  */
-export function scoreMuscles(volumeStatus, readinessData) {
+export function scoreMuscles(volumeStatus, readinessData, extra = {}) {
+  const { weeklyVolume = {}, weeklySets = [], exercises = [], goalMap = {}, asOf = new Date() } = extra;
   const scores = {};
+
+  // Days left in rolling 7-day window (approximate: days remaining in calendar week)
+  const dayOfWeek = asOf.getDay(); // 0=Sun
+  const daysLeftInWindow = Math.max(1, 7 - dayOfWeek);
 
   for (const vs of volumeStatus) {
     const mr = readinessData.perMuscle[vs.muscleId];
     if (!mr) continue;
 
-    const readinessFactor = mr.readiness / 100;
+    const sessionDays = countMuscleSessionDays(weeklySets, exercises, vs.muscleId);
 
-    let priority = 0;
-    let reason = '';
+    const result = computeMusclePriority({
+      muscleId: vs.muscleId,
+      sets: vs.sets,
+      mev: vs.mev,
+      mav: vs.mav,
+      mrv: vs.mrv,
+      readiness: mr.readiness,
+      sessionDays,
+      daysLeftInWindow,
+      weeklyVolume,
+      stalls: readinessData.stalls,
+      exercises,
+      goalLevel: goalMap[vs.muscleId] ?? 'medium',
+    });
 
-    if (vs.status === 'over') {
-      // Over MRV — skip this muscle
-      priority = 0;
-      reason = `Over MRV (${vs.sets}/${vs.mrv} sets) — needs rest`;
-    } else if (mr.status === 'fatigued') {
-      // Too fatigued to train effectively
-      priority = 0;
-      reason = `Fatigued (readiness ${mr.readiness}) — needs recovery`;
-    } else if (vs.status === 'under') {
-      // Below MEV — high priority scaled by readiness
-      priority = (vs.deficit / vs.mev) * readinessFactor * 100;
-      reason = `Under MEV (${vs.sets}/${vs.mev} sets), readiness ${mr.readiness}`;
-    } else {
-      // In zone — moderate priority to push toward MAV
-      const roomToMav = vs.mav - vs.sets;
-      const roomFraction = roomToMav / (vs.mav - vs.mev || 1);
-      priority = roomFraction * readinessFactor * 50;
-      reason = `In zone (${vs.sets}/${vs.mav} sets), room for more`;
-    }
-
-    scores[vs.muscleId] = { priority: Math.round(priority * 10) / 10, reason };
+    scores[vs.muscleId] = result;
   }
 
   return scores;
@@ -230,6 +233,7 @@ function buildReason(exercise, muscleScores, remainingPriority) {
 export function recommend({ sets: allSets, exercises, muscles, landmarks }, options = {}) {
   const asOf = options.asOf ?? new Date();
   const targetSets = options.targetSets ?? DEFAULT_TARGET_SETS;
+  const goalMap = options.goalMap ?? {};
 
   // 1. Weekly volume from rolling 7-day window
   const weeklySets = filterToWindow(allSets, 7, asOf);
@@ -239,8 +243,14 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   // 2. Readiness (uses full history for stall detection, ACR)
   const readiness = computeReadiness(allSets, exercises, muscles, asOf);
 
-  // 3. Score muscles
-  const muscleScores = scoreMuscles(volumeStatus, readiness);
+  // 3. Score muscles with multi-factor priority
+  const muscleScores = scoreMuscles(volumeStatus, readiness, {
+    weeklyVolume: volume,
+    weeklySets,
+    exercises,
+    goalMap,
+    asOf,
+  });
 
   // 4. Score and pick exercises
   const scoredExercises = scoreExercises(exercises, muscleScores, options.availableEquipment ?? null);

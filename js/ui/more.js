@@ -3,17 +3,21 @@
  */
 
 import { logMetric, getMetricsByType, getAllMetrics } from '../data/metrics.js';
+import { getGoalMap, setGoal } from '../data/goals.js';
+import { getAllMuscles } from '../data/muscles.js';
 import { lineChart } from './charts.js';
 
 let container = null;
 let db = null;
 let state = {
-  tab: 'body',  // 'body' | 'backup'
+  tab: 'body',  // 'body' | 'backup' | 'goals'
   bodyweightHistory: [],
   measurementHistory: [],
   bwValue: '',
   measValue: '',
   measLabel: 'waist',
+  goalMap: {},
+  muscles: [],
 };
 
 const MEASUREMENT_LABELS = ['waist', 'chest', 'arm', 'thigh', 'neck', 'hips'];
@@ -28,6 +32,9 @@ export const morePage = {
 
     state.measurementHistory = await getMetricsByType(db, 'measurement');
     state.measurementHistory.sort((a, b) => a.date.localeCompare(b.date));
+
+    state.goalMap = await getGoalMap(db);
+    state.muscles = await getAllMuscles(db);
 
     render();
   },
@@ -46,11 +53,12 @@ function render() {
 
       <!-- Tab toggle -->
       <div class="flex gap-2">
+        <button class="btn btn-sm ${state.tab === 'goals' ? 'btn-primary' : 'btn-secondary'}" data-tab="goals">Goals</button>
         <button class="btn btn-sm ${state.tab === 'body' ? 'btn-primary' : 'btn-secondary'}" data-tab="body">Body</button>
         <button class="btn btn-sm ${state.tab === 'backup' ? 'btn-primary' : 'btn-secondary'}" data-tab="backup">Backup</button>
       </div>
 
-      ${state.tab === 'body' ? renderBody() : renderBackup()}
+      ${state.tab === 'goals' ? renderGoals() : state.tab === 'body' ? renderBody() : renderBackup()}
     </div>
   `;
 
@@ -63,8 +71,65 @@ function render() {
   });
 
   // Tab-specific events
+  if (state.tab === 'goals') bindGoalEvents();
   if (state.tab === 'body') bindBodyEvents();
   if (state.tab === 'backup') bindBackupEvents();
+}
+
+function renderGoals() {
+  const levels = ['high', 'medium', 'low'];
+  const levelColors = { high: 'var(--accent)', medium: 'var(--text-secondary)', low: 'var(--text-muted)' };
+  const levelLabels = { high: 'High', medium: 'Med', low: 'Low' };
+
+  // Group muscles by body region
+  const groups = { upper: [], lower: [], core: [] };
+  for (const m of state.muscles) {
+    (groups[m.group] ?? groups.upper).push(m);
+  }
+
+  const groupNames = { upper: 'Upper Body', lower: 'Lower Body', core: 'Core' };
+
+  return `
+    <div class="card flex flex-col gap-4">
+      <div class="card-header">Training Priorities</div>
+      <p class="text-sm text-muted">Tap to cycle: High &rarr; Medium &rarr; Low. High priority muscles get recommended more often.</p>
+
+      ${Object.entries(groups).map(([group, muscles]) => `
+        <div>
+          <div class="text-sm" style="font-weight:600;margin-bottom:var(--sp-2);">${groupNames[group]}</div>
+          <div class="flex flex-col gap-2">
+            ${muscles.map((m) => {
+              const level = state.goalMap[m.id] ?? 'medium';
+              return `
+                <button class="flex items-center justify-between goal-btn" data-muscle="${m.id}"
+                  style="background:var(--bg-input);padding:var(--sp-3) var(--sp-4);border-radius:var(--radius-sm);border:none;cursor:pointer;-webkit-tap-highlight-color:transparent;">
+                  <span style="color:var(--text-primary);font-size:var(--text-base);">${m.name}</span>
+                  <span style="color:${levelColors[level]};font-weight:600;font-size:var(--text-sm);min-width:36px;text-align:right;">${levelLabels[level]}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function bindGoalEvents() {
+  const levels = ['high', 'medium', 'low'];
+
+  container.querySelectorAll('.goal-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const muscleId = btn.dataset.muscle;
+      const current = state.goalMap[muscleId] ?? 'medium';
+      const nextIdx = (levels.indexOf(current) + 1) % levels.length;
+      const next = levels[nextIdx];
+
+      state.goalMap[muscleId] = next;
+      await setGoal(db, muscleId, next);
+      render();
+    });
+  });
 }
 
 function renderBody() {

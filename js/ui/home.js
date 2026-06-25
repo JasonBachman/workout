@@ -15,6 +15,7 @@ import { computeWeeklyVolume, evaluateVolume, filterToWindow, checkAntagonistBal
 import { computeReadiness } from '../engine/readiness.js';
 import { analyzeProgression } from '../engine/progression.js';
 import { getActiveProgram } from '../data/programs.js';
+import { getGoalMap } from '../data/goals.js';
 import { renderBodyMap } from './bodymap.js';
 
 let container = null;
@@ -45,8 +46,9 @@ export const homePage = {
     // Antagonist balance
     const balanceWarnings = checkAntagonistBalance(volume);
 
-    // Recommendation
-    const rec = recommend({ sets: allSets, exercises, muscles, landmarks }, { asOf: now });
+    // Recommendation (with goal priorities)
+    const goalMap = await getGoalMap(db);
+    const rec = recommend({ sets: allSets, exercises, muscles, landmarks }, { asOf: now, goalMap });
 
     // Progression analysis
     const program = await getActiveProgram(db);

@@ -9,7 +9,7 @@
  */
 
 // ── Antagonist pairs for balance checks ──
-const ANTAGONIST_PAIRS = [
+export const ANTAGONIST_PAIRS = [
   ['chest', 'upper-back'],
   ['front-delts', 'rear-delts'],
   ['biceps', 'triceps'],

@@ -136,6 +136,99 @@ export function adjustProgression(currentProgression, actualRate) {
 }
 
 /**
+ * Compute today's target weight and reps for an exercise.
+ * Uses the last session's best working set and the progression strategy.
+ *
+ * @param {Array} sets - All sets for this exercise
+ * @param {Object} progression - { type, incrementLbs, frequency, targetRepsBeforeIncrease }
+ * @returns {{
+ *   targetWeight: number, targetReps: number,
+ *   lastWeight: number, lastReps: number, lastDate: string,
+ *   note: string
+ * } | null}
+ */
+export function computeTarget(sets, progression) {
+  if (sets.length === 0) return null;
+
+  // Find the most recent session
+  const byDate = {};
+  for (const s of sets) {
+    if (!byDate[s.date]) byDate[s.date] = [];
+    byDate[s.date].push(s);
+  }
+
+  const dates = Object.keys(byDate).sort();
+  const lastDate = dates[dates.length - 1];
+  const lastSets = byDate[lastDate];
+
+  // Find the best working set from last session (highest e1RM, skip warm-ups)
+  let bestSet = null;
+  let bestE1RM = 0;
+  for (const s of lastSets) {
+    if (s.reps < 5 || s.reps > 30) continue;
+    const e = estimateE1RM(s.weight, s.reps);
+    if (e > bestE1RM) {
+      bestE1RM = e;
+      bestSet = s;
+    }
+  }
+
+  if (!bestSet) return null;
+
+  const lastWeight = bestSet.weight;
+  const lastReps = bestSet.reps;
+  const prog = progression ?? { type: 'linear', incrementLbs: 5, frequency: 'week' };
+
+  let targetWeight = lastWeight;
+  let targetReps = lastReps;
+  let note = '';
+
+  if (prog.type === 'rep-first') {
+    // Add reps first, then weight
+    const repTarget = prog.targetRepsBeforeIncrease ?? 12;
+    if (lastReps < repTarget) {
+      targetWeight = lastWeight;
+      targetReps = Math.min(lastReps + 1, repTarget);
+      note = `Push for ${targetReps} reps before adding weight`;
+    } else {
+      // Hit rep target — increase weight, reset reps
+      targetWeight = lastWeight + prog.incrementLbs;
+      targetReps = Math.max(lastReps - 3, 5); // drop reps when adding weight
+      note = `Hit ${repTarget} reps — adding ${prog.incrementLbs} lbs`;
+    }
+  } else {
+    // Linear progression — add weight
+    targetWeight = lastWeight + prog.incrementLbs;
+    targetReps = lastReps;
+
+    // If RPE was very high last time, don't increase weight
+    if (bestSet.rpe !== null && bestSet.rpe >= 9.5) {
+      targetWeight = lastWeight;
+      targetReps = lastReps;
+      note = 'Last set was near max effort — repeat before adding weight';
+    } else {
+      note = `+${prog.incrementLbs} lbs from last session`;
+    }
+  }
+
+  // Safety: never suggest more than 10% increase in one jump
+  const maxSafeIncrease = lastWeight * 0.1;
+  if (targetWeight - lastWeight > maxSafeIncrease && maxSafeIncrease > 0) {
+    targetWeight = lastWeight + Math.round(maxSafeIncrease / 2.5) * 2.5; // round to nearest 2.5
+    note = `Capped at +${Math.round(maxSafeIncrease)} lbs (10% safety limit)`;
+  }
+
+  return {
+    targetWeight: Math.round(targetWeight * 10) / 10,
+    targetReps,
+    lastWeight,
+    lastReps,
+    lastDate,
+    note,
+  };
+}
+
+/**
  * Analyze progression for all exercises in a program and return recommendations.
  *
  * @param {Object} program - Active program

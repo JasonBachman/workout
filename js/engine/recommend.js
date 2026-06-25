@@ -36,9 +36,14 @@ export function scoreMuscles(volumeStatus, readinessData, extra = {}) {
   const { weeklyVolume = {}, weeklySets = [], exercises = [], goalMap = {}, asOf = new Date() } = extra;
   const scores = {};
 
-  // Days left in rolling 7-day window (approximate: days remaining in calendar week)
-  const dayOfWeek = asOf.getDay(); // 0=Sun
-  const daysLeftInWindow = Math.max(1, 7 - dayOfWeek);
+  // For frequency urgency: estimate training days remaining this week.
+  // Count distinct training days so far in the 7-day window, assume similar pattern going forward.
+  const allTrainingDates = new Set(weeklySets.map((s) => s.date));
+  const daysPassed = Math.max(1, allTrainingDates.size);
+  const asOfDay = asOf.getDay(); // 0=Sun
+  const calendarDaysLeft = Math.max(1, 7 - asOfDay);
+  // Use the smaller of calendar days left or a reasonable estimate
+  const daysLeftInWindow = Math.min(calendarDaysLeft, 4);
 
   for (const vs of volumeStatus) {
     const mr = readinessData.perMuscle[vs.muscleId];

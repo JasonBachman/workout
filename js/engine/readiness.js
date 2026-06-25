@@ -52,27 +52,42 @@ export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()
   // A "session" = all sets for that muscle on the same date.
   const muscleSessionData = {}; // muscleId → { lastTimestamp, lastDate, sets: [] }
 
+  // First pass: find the most recent date for each muscle
+  const lastDateForMuscle = {}; // muscleId → most recent date string
+
   for (const s of sets) {
     const exercise = exerciseMap[s.exerciseId];
     if (!exercise) continue;
 
     for (const [muscleId, fraction] of Object.entries(exercise.muscles)) {
-      if (fraction < 0.3) continue; // same threshold as volume engine
+      if (fraction < 0.3) continue;
+      if (!lastDateForMuscle[muscleId] || s.date > lastDateForMuscle[muscleId]) {
+        lastDateForMuscle[muscleId] = s.date;
+      }
+    }
+  }
+
+  // Second pass: collect ALL sets from the most recent date for each muscle
+  for (const s of sets) {
+    const exercise = exerciseMap[s.exerciseId];
+    if (!exercise) continue;
+
+    // Skip warm-ups: only count sets in effective rep range with meaningful weight
+    if (s.reps < 5 || s.reps > 30) continue;
+    if (s.rpe !== null && s.rpe !== undefined && s.rpe < 6) continue;
+
+    for (const [muscleId, fraction] of Object.entries(exercise.muscles)) {
+      if (fraction < 0.3) continue;
+      if (s.date !== lastDateForMuscle[muscleId]) continue;
 
       if (!muscleSessionData[muscleId]) {
-        muscleSessionData[muscleId] = { lastTimestamp: 0, lastDate: null, sets: [] };
+        muscleSessionData[muscleId] = { lastTimestamp: 0, lastDate: s.date, sets: [] };
       }
 
       const md = muscleSessionData[muscleId];
-
+      md.sets.push({ fraction, rpe: s.rpe, weight: s.weight, reps: s.reps });
       if (s.timestamp > md.lastTimestamp) {
-        // New most-recent session — reset
         md.lastTimestamp = s.timestamp;
-        md.lastDate = s.date;
-        md.sets = [{ fraction, rpe: s.rpe, weight: s.weight, reps: s.reps }];
-      } else if (s.date === md.lastDate) {
-        // Same session day — add to it
-        md.sets.push({ fraction, rpe: s.rpe, weight: s.weight, reps: s.reps });
       }
     }
   }

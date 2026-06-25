@@ -7,7 +7,8 @@
 
 import { logSet, getSetsByDate, getSetsByExercise, deleteSet, estimateE1RM } from '../data/sets.js';
 import { getAllExercises } from '../data/exercises.js';
-import { getActiveProgram } from '../data/programs.js';
+import { getActiveProgram, DEFAULT_PROGRESSION } from '../data/programs.js';
+import { computeTarget, computeProgressionRate, adjustProgression } from '../engine/progression.js';
 import { showToast } from './toast.js';
 
 const RPE_OPTIONS = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10];
@@ -23,6 +24,7 @@ let state = {
   searchQuery: '',
   program: null,
   date: new Date().toISOString().slice(0, 10),
+  target: null, // { targetWeight, targetReps, lastWeight, lastReps, note }
 };
 
 let container = null;
@@ -178,15 +180,44 @@ async function selectExercise(exerciseId) {
   state.weight = '';
   state.reps = '';
   state.rpe = null;
+  state.target = null;
 
-  // Load last session for reference
+  // Load all sets for this exercise
   const allSets = await getSetsByExercise(db, exerciseId);
   const dates = [...new Set(allSets.map((s) => s.date))].sort().reverse();
   const lastDate = dates.find((d) => d < new Date().toISOString().slice(0, 10)) ?? dates[0];
   state.lastSessionSets = lastDate ? allSets.filter((s) => s.date === lastDate) : [];
 
-  // Prefill weight from last session's last set
-  if (state.lastSessionSets.length > 0) {
+  // Compute progressive overload target
+  const ex = state.selectedExercise;
+  const defaultProg = DEFAULT_PROGRESSION[ex?.pattern] ?? DEFAULT_PROGRESSION['isolation'];
+
+  // Check if this exercise is in the active program with a custom progression
+  let progression = defaultProg;
+  if (state.program) {
+    for (const day of state.program.days) {
+      const slot = day.slots.find((s) => s.exerciseId === exerciseId);
+      if (slot?.progression) {
+        progression = slot.progression;
+        break;
+      }
+    }
+  }
+
+  // Auto-adjust progression based on actual rate
+  const rate = computeProgressionRate(allSets);
+  if (rate.trend !== 'insufficient') {
+    const adjusted = adjustProgression(progression, rate);
+    progression = adjusted.progression;
+  }
+
+  state.target = computeTarget(allSets, progression);
+
+  // Prefill with target if available, otherwise last session
+  if (state.target) {
+    state.weight = String(state.target.targetWeight);
+    state.reps = String(state.target.targetReps);
+  } else if (state.lastSessionSets.length > 0) {
     const last = state.lastSessionSets[state.lastSessionSets.length - 1];
     state.weight = String(last.weight);
     state.reps = String(last.reps);
@@ -206,6 +237,14 @@ function renderSetEntry() {
         <button class="btn btn-ghost btn-sm" id="back-btn">&#8592;</button>
         <h2 style="font-size: var(--text-xl); font-weight: 700;">${ex.name}</h2>
       </div>
+
+      ${state.target ? `
+        <div class="card" style="border-left: 3px solid var(--accent);">
+          <div class="card-header">Target today</div>
+          <div class="card-value" style="font-size:var(--text-2xl);">${state.target.targetWeight} <span style="font-size:var(--text-lg);color:var(--text-secondary);">lbs</span> × ${state.target.targetReps}</div>
+          <div class="text-sm text-muted mt-2">${state.target.note}</div>
+        </div>
+      ` : ''}
 
       ${state.lastSessionSets.length > 0 ? `
         <div class="card">

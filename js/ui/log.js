@@ -48,13 +48,11 @@ export const logPage = {
     // Check for session queue from dashboard
     if (ctx.sessionQueue && ctx.sessionQueue.length > 0) {
       state.queue = ctx.sessionQueue;
-      state.queueIndex = 0;
-      ctx.sessionQueue = null; // consume it
-      await selectExercise(state.queue[0].exercise.id);
-      return; // selectExercise calls render
+      ctx.sessionQueue = null;
+    } else {
+      state.queue = null;
     }
 
-    state.queue = null;
     render();
   },
 
@@ -68,9 +66,87 @@ function render() {
 
   if (state.selectedExercise) {
     renderSetEntry();
+  } else if (state.queue) {
+    renderQueueList();
   } else {
     renderExercisePicker();
   }
+}
+
+function renderQueueList() {
+  const isToday = state.date === new Date().toISOString().slice(0, 10);
+  const dateLabel = isToday ? 'Today' : formatDateShort(state.date);
+
+  // Track which queue exercises have logged sets today
+  const loggedByEx = {};
+  for (const s of state.todaySets) {
+    loggedByEx[s.exerciseId] = (loggedByEx[s.exerciseId] ?? 0) + 1;
+  }
+
+  container.innerHTML = `
+    <div class="container flex flex-col gap-4" style="padding-top: var(--sp-4);">
+      <div class="flex items-center justify-between">
+        <h2 style="font-size: var(--text-xl); font-weight: 700;">Today's Workout</h2>
+        <button class="btn btn-ghost btn-sm" id="exit-queue-btn">Browse All</button>
+      </div>
+
+      ${state.todaySets.length > 0 ? `
+        <div class="text-sm text-muted">${state.todaySets.length} sets logged ${dateLabel.toLowerCase()}</div>
+      ` : ''}
+
+      <div class="flex flex-col gap-3">
+        ${state.queue.map((item, i) => {
+          const setsLogged = loggedByEx[item.exercise.id] ?? 0;
+          const done = setsLogged >= item.sets;
+          return `
+            <div class="card flex flex-col gap-2" style="${done ? 'opacity:0.5;' : ''}">
+              <div class="flex items-center justify-between">
+                <button class="queue-exercise-btn" data-index="${i}" style="background:none;border:none;cursor:pointer;text-align:left;flex:1;-webkit-tap-highlight-color:transparent;">
+                  <div style="font-weight:600;color:var(--text-primary);font-size:var(--text-base);">${item.exercise.name}</div>
+                  <div class="text-sm text-muted">${item.reason}</div>
+                </button>
+                <div class="flex items-center gap-2">
+                  ${setsLogged > 0 ? `<span class="pill pill-ready">${setsLogged}/${item.sets}</span>` : `<span class="text-sm text-muted">${item.sets} sets</span>`}
+                  <button class="btn btn-ghost btn-sm queue-swap-btn" data-index="${i}" style="min-height:32px;padding:4px 8px;">Swap</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <button class="btn btn-secondary w-full" id="add-exercise-btn">+ Add Exercise</button>
+    </div>
+  `;
+
+  // Tap exercise to log sets
+  container.querySelectorAll('.queue-exercise-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      state.queueIndex = parseInt(btn.dataset.index, 10);
+      await selectExercise(state.queue[state.queueIndex].exercise.id);
+    });
+  });
+
+  // Swap
+  container.querySelectorAll('.queue-swap-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.queueIndex = parseInt(btn.dataset.index, 10);
+      state.selectedExercise = state.queue[state.queueIndex].exercise;
+      renderSwapPicker();
+    });
+  });
+
+  // Exit queue to browse all
+  container.querySelector('#exit-queue-btn')?.addEventListener('click', () => {
+    state.queue = null;
+    render();
+  });
+
+  // Add exercise from full library
+  container.querySelector('#add-exercise-btn')?.addEventListener('click', () => {
+    state.queue = null;
+    render();
+  });
 }
 
 function renderExercisePicker() {
@@ -251,19 +327,10 @@ function renderSetEntry() {
 
   container.innerHTML = `
     <div class="container flex flex-col gap-4" style="padding-top: var(--sp-4);">
-      ${inQueue ? `
-        <div class="flex items-center justify-between">
-          <div class="text-sm text-muted">${state.queueIndex + 1} of ${queueTotal}</div>
-          <div class="flex gap-2">
-            <button class="btn btn-ghost btn-sm" id="swap-btn">Swap</button>
-            <button class="btn btn-ghost btn-sm" id="exit-queue-btn">Exit</button>
-          </div>
-        </div>
-      ` : ''}
-
       <div class="flex items-center gap-3">
-        ${inQueue ? '' : '<button class="btn btn-ghost btn-sm" id="back-btn">&#8592;</button>'}
+        <button class="btn btn-ghost btn-sm" id="back-btn">&#8592;</button>
         <h2 style="font-size: var(--text-xl); font-weight: 700;">${ex.name}</h2>
+        ${inQueue ? '<button class="btn btn-ghost btn-sm" id="swap-btn" style="margin-left:auto;">Swap</button>' : ''}
       </div>
 
       ${inQueue && queueItem ? `
@@ -337,47 +404,11 @@ function renderSetEntry() {
         </button>
       </div>
 
-      ${inQueue ? `
-        <div class="flex gap-3">
-          ${state.queueIndex > 0 ? '<button class="btn btn-secondary" id="queue-prev" style="flex:1;">Previous</button>' : ''}
-          ${state.queueIndex < queueTotal - 1
-            ? '<button class="btn btn-primary" id="queue-next" style="flex:1;">Next Exercise</button>'
-            : '<button class="btn btn-primary" id="queue-finish" style="flex:1;">Finish Workout</button>'}
-        </div>
-      ` : ''}
     </div>
   `;
 
   // Events
   container.querySelector('#back-btn')?.addEventListener('click', () => {
-    state.selectedExercise = null;
-    render();
-  });
-
-  // Queue navigation
-  container.querySelector('#queue-next')?.addEventListener('click', async () => {
-    if (state.queueIndex < queueTotal - 1) {
-      state.queueIndex++;
-      await selectExercise(state.queue[state.queueIndex].exercise.id);
-    }
-  });
-
-  container.querySelector('#queue-prev')?.addEventListener('click', async () => {
-    if (state.queueIndex > 0) {
-      state.queueIndex--;
-      await selectExercise(state.queue[state.queueIndex].exercise.id);
-    }
-  });
-
-  container.querySelector('#queue-finish')?.addEventListener('click', () => {
-    state.queue = null;
-    state.selectedExercise = null;
-    showToast('Workout complete');
-    render();
-  });
-
-  container.querySelector('#exit-queue-btn')?.addEventListener('click', () => {
-    state.queue = null;
     state.selectedExercise = null;
     render();
   });

@@ -17,7 +17,21 @@ import { computeMusclePriority, countMuscleSessionDays, deriveIdealFrequency } f
 const DEFAULT_TARGET_SETS = 20;
 const MIN_TARGET_SETS = 18;
 const MAX_TARGET_SETS = 22;
-const SETS_PER_EXERCISE = 3; // assumed working sets per exercise picked
+const SETS_PER_EXERCISE = 3;
+
+// ── Muscle clusters for session coherence ──
+// Exercises within a cluster work well together and don't compete
+// with the next day's potential session.
+const MUSCLE_CLUSTERS = {
+  push:  ['chest', 'front-delts', 'side-delts', 'triceps'],
+  pull:  ['lats', 'upper-back', 'rear-delts', 'biceps', 'traps', 'forearms'],
+  lower: ['quads', 'hamstrings', 'glutes', 'calves'],
+};
+// Abs are "floaters" — they go with any cluster
+const FLOATER_MUSCLES = ['abs'];
+
+// How many sets to allow from non-primary clusters (for critical deficits)
+const OFF_CLUSTER_MAX_SETS = 3;
 
 /**
  * Score each muscle using multi-factor priority system.
@@ -119,7 +133,48 @@ export function scoreExercises(exercises, muscleScores, availableEquipment = nul
 }
 
 /**
- * Greedy exercise selection for a session.
+ * Determine which muscle cluster should be today's theme.
+ * Picks the cluster with the highest total muscle priority.
+ *
+ * @param {Object.<string, {priority: number}>} muscleScores
+ * @returns {{name: string, muscles: string[], score: number}}
+ */
+function pickCluster(muscleScores) {
+  const clusterScores = Object.entries(MUSCLE_CLUSTERS).map(([name, muscles]) => {
+    const score = muscles.reduce((sum, id) => sum + (muscleScores[id]?.priority ?? 0), 0);
+    return { name, muscles, score };
+  });
+
+  clusterScores.sort((a, b) => b.score - a.score);
+  return clusterScores[0];
+}
+
+/**
+ * Check if an exercise primarily serves the given cluster.
+ */
+function exerciseMatchesCluster(exercise, clusterMuscles) {
+  const clusterSet = new Set(clusterMuscles);
+  const floaterSet = new Set(FLOATER_MUSCLES);
+
+  // Find the exercise's top muscle by contribution
+  let topMuscle = null;
+  let topFraction = 0;
+  for (const [muscleId, fraction] of Object.entries(exercise.muscles)) {
+    if (fraction > topFraction) {
+      topFraction = fraction;
+      topMuscle = muscleId;
+    }
+  }
+
+  return clusterSet.has(topMuscle) || floaterSet.has(topMuscle);
+}
+
+/**
+ * Greedy exercise selection with cluster-based session coherence.
+ *
+ * Picks a winning cluster, fills most of the session from it,
+ * then allows a few sets from other clusters only if muscles
+ * are critically under MEV.
  *
  * @param {Array} scoredExercises - From scoreExercises()
  * @param {Object.<string, {priority: number}>} muscleScores - From scoreMuscles()
@@ -132,32 +187,44 @@ export function pickExercises(scoredExercises, muscleScores, options = {}) {
   const targetSets = options.targetSets ?? DEFAULT_TARGET_SETS;
   const setsPerEx = options.setsPerExercise ?? SETS_PER_EXERCISE;
 
-  const picks = [];
-  const usedPatterns = new Set();      // avoid near-duplicate movement patterns
-  const coveredVolume = {};            // track how much volume each muscle is getting
-  let totalSets = 0;
+  // Pick today's cluster theme
+  const cluster = pickCluster(muscleScores);
+  const clusterMuscles = [...cluster.muscles, ...FLOATER_MUSCLES];
 
-  // Deep copy muscle scores so we can subtract as we pick
+  const picks = [];
+  const usedPatterns = new Set();
+  let totalSets = 0;
+  let offClusterSets = 0;
+
   const remainingPriority = {};
   for (const [id, ms] of Object.entries(muscleScores)) {
     remainingPriority[id] = ms.priority;
   }
 
-  for (const candidate of scoredExercises) {
+  // Sort candidates: cluster-matching exercises first, then others
+  const sorted = [...scoredExercises].sort((a, b) => {
+    const aMatch = exerciseMatchesCluster(a.exercise, clusterMuscles) ? 1 : 0;
+    const bMatch = exerciseMatchesCluster(b.exercise, clusterMuscles) ? 1 : 0;
+    if (aMatch !== bMatch) return bMatch - aMatch; // cluster first
+    return b.score - a.score; // then by score
+  });
+
+  for (const candidate of sorted) {
     if (totalSets >= targetSets) break;
 
     const ex = candidate.exercise;
+    const isCluster = exerciseMatchesCluster(ex, clusterMuscles);
 
-    // Avoid picking two exercises with the same pattern + equipment combo
+    // Off-cluster exercises only allowed up to the cap
+    if (!isCluster && offClusterSets >= OFF_CLUSTER_MAX_SETS) continue;
+
     const patternKey = `${ex.pattern}-${ex.equipment}`;
     if (usedPatterns.has(patternKey)) continue;
 
-    // Don't pick if the top muscle is already well-covered
     if (candidate.topMuscle && (remainingPriority[candidate.topMuscle] ?? 0) <= 0) {
       continue;
     }
 
-    // Re-score this exercise with remaining priorities
     let currentScore = 0;
     for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
       currentScore += fraction * (remainingPriority[muscleId] ?? 0);
@@ -165,17 +232,15 @@ export function pickExercises(scoredExercises, muscleScores, options = {}) {
 
     if (currentScore <= 0) continue;
 
-    // Pick it
     const reason = buildReason(ex, muscleScores, remainingPriority);
     picks.push({ exercise: ex, sets: setsPerEx, reason });
 
     usedPatterns.add(patternKey);
     totalSets += setsPerEx;
+    if (!isCluster) offClusterSets += setsPerEx;
 
-    // Subtract covered volume from remaining priorities
     for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
       const covered = fraction * setsPerEx;
-      coveredVolume[muscleId] = (coveredVolume[muscleId] ?? 0) + covered;
       remainingPriority[muscleId] = Math.max(0, (remainingPriority[muscleId] ?? 0) - covered * 5);
     }
   }
@@ -257,11 +322,15 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
     asOf,
   });
 
-  // 4. Score and pick exercises
+  // 4. Pick cluster theme and select exercises
+  const cluster = pickCluster(muscleScores);
   const scoredExercises = scoreExercises(exercises, muscleScores, options.availableEquipment ?? null);
   const picks = pickExercises(scoredExercises, muscleScores, { targetSets });
 
   const totalSets = picks.reduce((sum, p) => sum + p.sets, 0);
 
-  return { picks, volumeStatus, readiness, totalSets };
+  const clusterLabels = { push: 'Push', pull: 'Pull', lower: 'Lower Body' };
+  const sessionFocus = clusterLabels[cluster.name] ?? cluster.name;
+
+  return { picks, volumeStatus, readiness, totalSets, sessionFocus };
 }

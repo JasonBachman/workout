@@ -105,7 +105,7 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
 
       <!-- Recommended Session -->
       <div class="card">
-        <div class="card-header">Recommended Today</div>
+        <div class="card-header">Recommended Today${rec.sessionFocus ? ` — ${rec.sessionFocus}` : ''}</div>
         ${rec.picks.length > 0 ? `
           <div class="flex flex-col gap-3 mt-2">
             ${rec.picks.map((pick) => `

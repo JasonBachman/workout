@@ -322,8 +322,12 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
     asOf,
   });
 
-  // 4. Pick cluster theme and select exercises
-  const cluster = pickCluster(muscleScores);
+  // 4. Pick cluster theme — sticky if already training today
+  const todayStr = asOf.toISOString().slice(0, 10);
+  const todaySets = allSets.filter((s) => s.date === todayStr);
+  const activeCluster = detectActiveCluster(todaySets, exercises);
+  const cluster = activeCluster ?? pickCluster(muscleScores);
+
   const scoredExercises = scoreExercises(exercises, muscleScores, options.availableEquipment ?? null);
   const picks = pickExercises(scoredExercises, muscleScores, { targetSets });
 
@@ -333,4 +337,54 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   const sessionFocus = clusterLabels[cluster.name] ?? cluster.name;
 
   return { picks, volumeStatus, readiness, totalSets, sessionFocus };
+}
+
+/**
+ * Detect which cluster the user has already started training today.
+ * Returns the cluster if a clear majority of today's sets match it,
+ * or null if no sets logged today.
+ */
+function detectActiveCluster(todaySets, exercises) {
+  if (todaySets.length === 0) return null;
+
+  const exMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
+
+  // Count how many sets belong to each cluster
+  const clusterCounts = {};
+  for (const [name, muscles] of Object.entries(MUSCLE_CLUSTERS)) {
+    clusterCounts[name] = 0;
+  }
+
+  for (const s of todaySets) {
+    const ex = exMap[s.exerciseId];
+    if (!ex) continue;
+
+    // Find which cluster this exercise's top muscle belongs to
+    let topMuscle = null;
+    let topFraction = 0;
+    for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
+      if (fraction > topFraction) {
+        topFraction = fraction;
+        topMuscle = muscleId;
+      }
+    }
+
+    for (const [name, muscles] of Object.entries(MUSCLE_CLUSTERS)) {
+      if (muscles.includes(topMuscle)) {
+        clusterCounts[name]++;
+        break;
+      }
+    }
+  }
+
+  // Pick the cluster with the most sets — must have at least 2 sets to be "active"
+  const sorted = Object.entries(clusterCounts)
+    .sort(([, a], [, b]) => b - a);
+
+  if (sorted[0][1] >= 2) {
+    const name = sorted[0][0];
+    return { name, muscles: MUSCLE_CLUSTERS[name], score: 0 };
+  }
+
+  return null;
 }

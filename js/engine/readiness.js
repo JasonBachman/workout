@@ -46,6 +46,12 @@ const STALL_SESSION_COUNT = 3;
 export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()) {
   const exerciseMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
   const nowMs = asOf.getTime();
+  const todayStr = asOf.toISOString().slice(0, 10);
+
+  // Exclude today's sets — intra-session fatigue is handled by the
+  // per-session volume cap, not the recovery engine. Recovery should
+  // only reflect the PREVIOUS session's load.
+  const previousSets = sets.filter((s) => s.date < todayStr);
 
   // For each muscle, find the most recent training session and compute
   // volume + intensity from that session to determine recovery needs.
@@ -55,7 +61,7 @@ export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()
   // First pass: find the most recent date for each muscle
   const lastDateForMuscle = {}; // muscleId → most recent date string
 
-  for (const s of sets) {
+  for (const s of previousSets) {
     const exercise = exerciseMap[s.exerciseId];
     if (!exercise) continue;
 
@@ -68,7 +74,7 @@ export function computeLocalRecovery(sets, exercises, muscles, asOf = new Date()
   }
 
   // Second pass: collect ALL sets from the most recent date for each muscle
-  for (const s of sets) {
+  for (const s of previousSets) {
     const exercise = exerciseMap[s.exerciseId];
     if (!exercise) continue;
 

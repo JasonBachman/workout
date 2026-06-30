@@ -1,4 +1,4 @@
-const CACHE_NAME = 'strength-v19';
+const CACHE_NAME = 'strength-v20';
 
 // Relative paths — resolved against SW scope at install time
 const PRECACHE_URLS = [
@@ -17,6 +17,7 @@ const PRECACHE_URLS = [
   'js/engine/volume.js',
   'js/engine/readiness.js',
   'js/engine/recommend.js',
+  'js/engine/session.js',
   'js/engine/progression.js',
   'js/engine/priority.js',
   'js/data/goals.js',

@@ -9,12 +9,15 @@ import { logSet, getSetsByDate, getSetsByExercise, deleteSet, estimateE1RM } fro
 import { getAllExercises } from '../data/exercises.js';
 import { getActiveProgram, DEFAULT_PROGRESSION } from '../data/programs.js';
 import { computeTarget, computeProgressionRate, adjustProgression } from '../engine/progression.js';
+import { computeSessionVolume, getSessionAlerts } from '../engine/session.js';
+import { getAllMuscles } from '../data/muscles.js';
 import { showToast } from './toast.js';
 
 const RPE_OPTIONS = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10];
 
 let state = {
   exercises: [],
+  muscles: [],
   selectedExercise: null,
   todaySets: [],
   lastSessionSets: [],
@@ -25,9 +28,8 @@ let state = {
   program: null,
   date: new Date().toISOString().slice(0, 10),
   target: null,
-  // Session queue
-  queue: null,       // array of { exercise, sets, reason } or null
-  queueIndex: 0,     // current position in queue
+  queue: null,
+  queueIndex: 0,
 };
 
 let container = null;
@@ -39,6 +41,7 @@ export const logPage = {
     db = ctx.db;
 
     state.exercises = await getAllExercises(db);
+    state.muscles = await getAllMuscles(db);
     state.date = new Date().toISOString().slice(0, 10);
     state.todaySets = await getSetsByDate(db, state.date);
     state.program = await getActiveProgram(db);
@@ -404,6 +407,8 @@ function renderSetEntry() {
         </button>
       </div>
 
+      ${renderSessionTracker()}
+
     </div>
   `;
 
@@ -474,6 +479,69 @@ function renderSetEntry() {
     state.rpe = null;
     render();
   });
+}
+
+function renderSessionTracker() {
+  if (state.todaySets.length === 0) return '';
+
+  const sessionVol = computeSessionVolume(state.todaySets, state.exercises);
+  const alerts = getSessionAlerts(sessionVol, state.muscles);
+
+  // Show the current exercise's muscles first, then any alerts
+  const ex = state.selectedExercise;
+  const relevantMuscles = ex
+    ? Object.entries(ex.muscles)
+        .filter(([, f]) => f >= 0.3)
+        .map(([id]) => id)
+    : [];
+
+  // Build display: relevant muscles for current exercise + any alerts
+  const displayed = new Set();
+  const rows = [];
+
+  for (const muscleId of relevantMuscles) {
+    const sv = sessionVol[muscleId];
+    if (!sv) continue;
+    displayed.add(muscleId);
+    rows.push({ muscleId, ...sv });
+  }
+
+  for (const alert of alerts) {
+    if (!displayed.has(alert.muscleId)) {
+      rows.push({ muscleId: alert.muscleId, sets: alert.sets, cap: alert.cap, status: alert.status });
+    }
+  }
+
+  if (rows.length === 0) return '';
+
+  const muscleNames = Object.fromEntries(state.muscles.map((m) => [m.id, m.name]));
+
+  return `
+    <div class="flex flex-col gap-2" style="margin-top:var(--sp-2);">
+      <div class="text-sm text-muted" style="font-weight:600;">Session Volume</div>
+      ${rows.map((r) => {
+        const name = muscleNames[r.muscleId] ?? r.muscleId;
+        const pct = Math.min(100, (r.sets / r.cap) * 100);
+        const barColor = r.status === 'over' ? 'var(--overworked)'
+          : r.status === 'warning' ? 'var(--recovering)'
+          : 'var(--ready)';
+        const label = r.status === 'over' ? ' — diminishing returns'
+          : r.status === 'warning' ? ' — approaching limit'
+          : '';
+        return `
+          <div>
+            <div class="flex justify-between" style="font-size:var(--text-xs);color:var(--text-secondary);">
+              <span>${name}${label}</span>
+              <span class="font-mono">${r.sets}/${r.cap}</span>
+            </div>
+            <div class="progress" style="height:4px;">
+              <div class="progress-fill" style="width:${pct}%;background:${barColor};"></div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderTodaySummary() {

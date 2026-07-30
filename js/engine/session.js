@@ -13,14 +13,38 @@
  * and increase injury/recovery risk ("junk volume").
  */
 
-// Per-session caps by muscle size
-const SESSION_CAP = {
+// Per-session caps by muscle size — the junk-volume ceiling for one session
+export const SESSION_CAP = {
   chest: 10, lats: 10, 'upper-back': 10, quads: 10, hamstrings: 10, glutes: 10,
   'front-delts': 8, 'side-delts': 8, 'rear-delts': 8,
   biceps: 8, triceps: 8, traps: 8, forearms: 8, calves: 8, abs: 8,
 };
 
 const MIN_CONTRIBUTION = 0.3; // same threshold as volume engine
+
+// Typical times a given cluster (push/pull/lower) is trained per week on a
+// split. The weekly MAV is spread across these sessions to size one day's
+// balanced dose. Tunable — higher = lighter, more frequent days.
+const SESSIONS_PER_WEEK_PER_CLUSTER = 2;
+const MIN_SESSION_TARGET = 3;
+
+/**
+ * Balanced per-session target for a muscle — the "well-rounded dose"
+ * we aim to hit in one session so a day covers its muscles evenly.
+ *
+ * Weekly MAV spread across the cluster's weekly frequency, floored so
+ * every trained muscle gets a real dose and capped at the per-session
+ * junk-volume ceiling.
+ *
+ * @param {string} muscleId
+ * @param {number} mav - weekly Maximum Adaptive Volume for the muscle
+ * @returns {number} target effective sets for this muscle this session
+ */
+export function sessionMuscleTarget(muscleId, mav) {
+  const cap = SESSION_CAP[muscleId] ?? 8;
+  const raw = Math.round((mav ?? 0) / SESSIONS_PER_WEEK_PER_CLUSTER);
+  return Math.max(MIN_SESSION_TARGET, Math.min(raw, cap));
+}
 
 /**
  * Compute per-muscle effective sets for the current session.

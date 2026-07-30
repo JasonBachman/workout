@@ -105,24 +105,26 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
 
       <!-- Recommended Session -->
       <div class="card">
-        <div class="card-header">Recommended Today${rec.sessionFocus ? ` — ${rec.sessionFocus}` : ''}</div>
+        <div class="card-header">${rec.dayActive ? 'Finish Today' : 'Recommended Today'}${rec.sessionFocus ? ` — ${rec.sessionFocus}` : ''}</div>
         ${rec.picks.length > 0 ? `
-          <div class="flex flex-col gap-3 mt-2">
+          <div class="flex flex-col gap-2 mt-2">
             ${rec.picks.map((pick) => `
-              <div class="flex items-center justify-between">
+              <button class="rec-pick flex items-center justify-between" data-ex-id="${pick.exercise.id}"
+                style="background:none;border:none;width:100%;text-align:left;cursor:pointer;padding:var(--sp-2) 0;-webkit-tap-highlight-color:transparent;">
                 <div>
-                  <div style="font-weight:600;">${pick.exercise.name}</div>
+                  <div style="font-weight:600;color:var(--text-primary);">${pick.exercise.name}</div>
                   <div class="text-sm text-muted">${pick.reason}</div>
                 </div>
-                <span class="font-mono text-sm" style="color:var(--text-secondary);">${pick.sets} sets</span>
-              </div>
+                <span class="font-mono text-sm" style="color:var(--text-secondary);white-space:nowrap;">${pick.sets} sets &rsaquo;</span>
+              </button>
             `).join('')}
-            <div class="flex items-center justify-between mt-2" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:var(--sp-3);">
-              <span class="text-sm text-muted">Total</span>
+            <div class="flex items-center justify-between mt-1" style="border-top:1px solid rgba(255,255,255,0.06);padding-top:var(--sp-3);">
+              <span class="text-sm text-muted">${rec.dayActive ? 'Remaining' : 'Total'}</span>
               <span class="font-mono" style="font-weight:600;">${rec.totalSets} sets</span>
             </div>
           </div>
-          <button class="btn btn-primary w-full mt-4" id="start-workout-btn">Start Workout</button>
+          ${renderSessionLoad(rec.sessionLoad, muscleNames)}
+          <button class="btn btn-primary w-full mt-4" id="start-workout-btn">${rec.dayActive ? 'Continue Workout' : 'Start Workout'}</button>
         ` : `
           <div class="text-sm text-muted mt-2">
             ${readiness.systemic.fatigued
@@ -200,16 +202,67 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
     </div>
   `;
 
-  // Start Workout — store picks on context and navigate to log
-  container.querySelector('#start-workout-btn')?.addEventListener('click', () => {
+  // Load the recommended session into the log context.
+  const loadQueue = () => {
     ctx.sessionQueue = rec.picks.map((p) => ({
       exercise: p.exercise,
       sets: p.sets,
       reason: p.reason,
     }));
     ctx.allExercises = exercises;
+  };
+
+  // Start/Continue Workout — open the queue list.
+  container.querySelector('#start-workout-btn')?.addEventListener('click', () => {
+    loadQueue();
+    ctx.sessionOpenExerciseId = null;
     location.hash = '#/log';
   });
+
+  // Tap an individual rec — jump straight into logging that exercise.
+  container.querySelectorAll('.rec-pick').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      loadQueue();
+      ctx.sessionOpenExerciseId = btn.dataset.exId;
+      location.hash = '#/log';
+    });
+  });
+}
+
+/**
+ * Per-muscle set load for the day's cluster: how the completed +
+ * planned sets stack up against a balanced per-session target.
+ */
+function renderSessionLoad(sessionLoad, muscleNames) {
+  if (!sessionLoad || sessionLoad.length === 0) return '';
+
+  // Only show muscles this day actually touches (target or activity).
+  const rows = sessionLoad.filter((r) => r.done > 0 || r.planned > 0);
+  if (rows.length === 0) return '';
+
+  return `
+    <div class="flex flex-col gap-2 mt-4">
+      <div class="text-sm text-muted" style="font-weight:600;">Set load this day</div>
+      ${rows.map((r) => {
+        const name = muscleNames[r.muscleId] ?? r.muscleId;
+        const total = Math.round((r.done + r.planned) * 10) / 10;
+        const pct = r.target > 0 ? Math.min(100, (total / r.target) * 100) : 0;
+        const donePct = r.target > 0 ? Math.min(100, (r.done / r.target) * 100) : 0;
+        return `
+          <div>
+            <div class="flex justify-between" style="font-size:var(--text-xs);color:var(--text-secondary);">
+              <span>${name}</span>
+              <span class="font-mono">${r.done > 0 ? `${r.done} done + ${r.planned} planned` : `${r.planned} planned`} / ${r.target}</span>
+            </div>
+            <div class="progress" style="height:4px;position:relative;">
+              <div class="progress-fill" style="width:${pct}%;background:var(--recovering);"></div>
+              <div class="progress-fill" style="width:${donePct}%;background:var(--ready);position:absolute;top:0;left:0;"></div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderProgressionCard(progressionData, exMap) {

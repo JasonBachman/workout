@@ -56,6 +56,17 @@ export const logPage = {
       state.queue = null;
     }
 
+    // Dashboard tapped a specific rec — open its set-entry screen directly.
+    const openId = ctx.sessionOpenExerciseId;
+    ctx.sessionOpenExerciseId = null;
+    if (openId && state.exercises.some((e) => e.id === openId)) {
+      state.queueIndex = state.queue
+        ? Math.max(0, state.queue.findIndex((q) => q.exercise.id === openId))
+        : 0;
+      await selectExercise(openId); // renders the set-entry screen
+      return;
+    }
+
     render();
   },
 

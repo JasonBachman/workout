@@ -11,7 +11,8 @@
 
 import { computeWeeklyVolume, evaluateVolume, filterToWindow } from './volume.js';
 import { computeReadiness } from './readiness.js';
-import { computeMusclePriority, countMuscleSessionDays, deriveIdealFrequency } from './priority.js';
+import { computeMusclePriority, countMuscleSessionDays } from './priority.js';
+import { computeSessionVolume, sessionMuscleTarget } from './session.js';
 
 // ── Defaults ──
 const DEFAULT_TARGET_SETS = 20;
@@ -172,36 +173,45 @@ function exerciseMatchesCluster(exercise, clusterMuscles) {
 /**
  * Greedy exercise selection with cluster-based session coherence.
  *
- * Picks a winning cluster, fills most of the session from it,
- * then allows a few sets from other clusters only if muscles
- * are critically under MEV.
+ * Fills the day's cluster toward a balanced per-muscle set target,
+ * stopping once every cluster muscle's remaining need is met (a
+ * well-rounded day) or the session budget is spent. A few off-cluster
+ * sets are allowed only for muscles with a live priority (critical gaps).
  *
  * @param {Array} scoredExercises - From scoreExercises()
  * @param {Object.<string, {priority: number}>} muscleScores - From scoreMuscles()
+ * @param {{name: string, muscles: string[]}} cluster - Resolved day theme (sticky)
  * @param {Object} options
- * @param {number} options.targetSets - Target total sets (default 20)
+ * @param {number} options.targetSets - Upper bound of NEW sets to add (default 20)
  * @param {number} options.setsPerExercise - Assumed sets per pick (default 3)
+ * @param {Object.<string, number>} options.sessionNeed - muscleId → sets still
+ *        needed this session (per-muscle target minus what's done today).
+ *        Cluster muscles absent/≤0 are treated as satisfied.
  * @returns {Array} [{exercise, sets, reason}]
  */
-export function pickExercises(scoredExercises, muscleScores, options = {}) {
+export function pickExercises(scoredExercises, muscleScores, cluster, options = {}) {
   const targetSets = options.targetSets ?? DEFAULT_TARGET_SETS;
   const setsPerEx = options.setsPerExercise ?? SETS_PER_EXERCISE;
+  const sessionNeed = options.sessionNeed ?? {};
 
-  // Pick today's cluster theme
-  const cluster = pickCluster(muscleScores);
   const clusterMuscles = [...cluster.muscles, ...FLOATER_MUSCLES];
+  const clusterSet = new Set(clusterMuscles);
 
   const picks = [];
   const usedPatterns = new Set();
   let totalSets = 0;
   let offClusterSets = 0;
 
-  const remainingPriority = {};
-  for (const [id, ms] of Object.entries(muscleScores)) {
-    remainingPriority[id] = ms.priority;
-  }
+  // Remaining unmet need per cluster muscle this session (mutated as we pick).
+  const need = {};
+  for (const m of clusterMuscles) need[m] = Math.max(0, sessionNeed[m] ?? 0);
+  const clusterNeedLeft = () => Object.values(need).some((n) => n > 0);
 
-  // Sort candidates: cluster-matching exercises first, then others
+  // Off-cluster interest is priority-driven (for critical sub-MEV gaps).
+  const remainingPriority = {};
+  for (const [id, ms] of Object.entries(muscleScores)) remainingPriority[id] = ms.priority;
+
+  // Sort candidates: cluster-matching exercises first, then by score.
   const sorted = [...scoredExercises].sort((a, b) => {
     const aMatch = exerciseMatchesCluster(a.exercise, clusterMuscles) ? 1 : 0;
     const bMatch = exerciseMatchesCluster(b.exercise, clusterMuscles) ? 1 : 0;
@@ -211,26 +221,38 @@ export function pickExercises(scoredExercises, muscleScores, options = {}) {
 
   for (const candidate of sorted) {
     if (totalSets >= targetSets) break;
+    // Stop once the day is well-rounded (all cluster muscles satisfied),
+    // unless off-cluster critical work is still allowed within its cap.
+    if (!clusterNeedLeft() && offClusterSets >= OFF_CLUSTER_MAX_SETS) break;
 
     const ex = candidate.exercise;
     const isCluster = exerciseMatchesCluster(ex, clusterMuscles);
 
-    // Off-cluster exercises only allowed up to the cap
     if (!isCluster && offClusterSets >= OFF_CLUSTER_MAX_SETS) continue;
 
     const patternKey = `${ex.pattern}-${ex.equipment}`;
     if (usedPatterns.has(patternKey)) continue;
 
-    if (candidate.topMuscle && (remainingPriority[candidate.topMuscle] ?? 0) <= 0) {
-      continue;
+    let accept = false;
+    if (isCluster) {
+      // Accept only if this exercise's PRIMARY cluster muscle still has
+      // unmet need — stops us piling compound lifts onto an already-full
+      // mover just because they incidentally touch other muscles.
+      let topClusterMuscle = null;
+      let topFraction = 0;
+      for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
+        if (clusterSet.has(muscleId) && fraction > topFraction) {
+          topFraction = fraction;
+          topClusterMuscle = muscleId;
+        }
+      }
+      accept = topClusterMuscle !== null && (need[topClusterMuscle] ?? 0) > 0;
+    } else {
+      // Off-cluster: only for a muscle with live priority (critical gap).
+      accept = (candidate.topMuscle && (remainingPriority[candidate.topMuscle] ?? 0) > 0);
     }
 
-    let currentScore = 0;
-    for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
-      currentScore += fraction * (remainingPriority[muscleId] ?? 0);
-    }
-
-    if (currentScore <= 0) continue;
+    if (!accept) continue;
 
     const reason = buildReason(ex, muscleScores, remainingPriority);
     picks.push({ exercise: ex, sets: setsPerEx, reason });
@@ -241,6 +263,7 @@ export function pickExercises(scoredExercises, muscleScores, options = {}) {
 
     for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
       const covered = fraction * setsPerEx;
+      if (muscleId in need) need[muscleId] = Math.max(0, need[muscleId] - covered);
       remainingPriority[muscleId] = Math.max(0, (remainingPriority[muscleId] ?? 0) - covered * 5);
     }
   }
@@ -328,15 +351,50 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   const activeCluster = detectActiveCluster(todaySets, exercises);
   const cluster = activeCluster ?? pickCluster(muscleScores);
 
+  // 5. Session-awareness: assume the user finishes this day. Compute a
+  // balanced per-muscle target, subtract what's already done today, and
+  // recommend only what's left to round out the session.
+  const landmarkMap = Object.fromEntries(landmarks.map((lm) => [lm.muscleId, lm]));
+  const doneVolume = computeSessionVolume(todaySets, exercises);
+  const dayMuscles = [...cluster.muscles, ...FLOATER_MUSCLES];
+
+  const sessionNeed = {};
+  const sessionLoad = [];
+  for (const muscleId of dayMuscles) {
+    const lm = landmarkMap[muscleId];
+    if (!lm) continue;
+    const target = sessionMuscleTarget(muscleId, lm.mav);
+    const done = doneVolume[muscleId]?.sets ?? 0;
+    sessionNeed[muscleId] = Math.max(0, target - done);
+    sessionLoad.push({ muscleId, done: Math.round(done * 10) / 10, planned: 0, target });
+  }
+
+  // Remaining session budget shrinks as sets are logged today, but never
+  // collapses below one exercise so there's always a useful pick to offer.
+  const remainingBudget = Math.max(SETS_PER_EXERCISE, targetSets - todaySets.length);
+
   const scoredExercises = scoreExercises(exercises, muscleScores, options.availableEquipment ?? null);
-  const picks = pickExercises(scoredExercises, muscleScores, { targetSets });
+  const picks = pickExercises(scoredExercises, muscleScores, cluster, {
+    targetSets: remainingBudget,
+    sessionNeed,
+  });
 
   const totalSets = picks.reduce((sum, p) => sum + p.sets, 0);
 
+  // Fold planned sets from the picks into the per-muscle load display.
+  const loadIndex = Object.fromEntries(sessionLoad.map((r) => [r.muscleId, r]));
+  for (const p of picks) {
+    for (const [muscleId, fraction] of Object.entries(p.exercise.muscles)) {
+      const row = loadIndex[muscleId];
+      if (row) row.planned = Math.round((row.planned + fraction * p.sets) * 10) / 10;
+    }
+  }
+
   const clusterLabels = { push: 'Push', pull: 'Pull', lower: 'Lower Body' };
   const sessionFocus = clusterLabels[cluster.name] ?? cluster.name;
+  const dayActive = activeCluster !== null;
 
-  return { picks, volumeStatus, readiness, totalSets, sessionFocus };
+  return { picks, volumeStatus, readiness, totalSets, sessionFocus, sessionLoad, dayActive };
 }
 
 /**
@@ -377,11 +435,12 @@ function detectActiveCluster(todaySets, exercises) {
     }
   }
 
-  // Pick the cluster with the most sets — must have at least 2 sets to be "active"
+  // Pick the cluster with the most sets — a single logged set locks the day
+  // so recommendations stop drifting the moment a session starts.
   const sorted = Object.entries(clusterCounts)
     .sort(([, a], [, b]) => b - a);
 
-  if (sorted[0][1] >= 2) {
+  if (sorted[0][1] >= 1) {
     const name = sorted[0][0];
     return { name, muscles: MUSCLE_CLUSTERS[name], score: 0 };
   }

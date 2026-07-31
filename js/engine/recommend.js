@@ -38,6 +38,13 @@ const OFF_CLUSTER_MAX_SETS = 3;
 // average priority must be before we suggest switching off the started day.
 const SOFT_OVERRIDE_MARGIN = 10;
 
+// Neglect boost: a whole region that is deeply under MEV *and* recovered is
+// the strongest training opportunity and should outrank an imbalance
+// correction (e.g. untrained legs beat a recovering-but-lagging pull day).
+// Added to a cluster's average priority, scaled by how neglected+ready it is.
+const NEGLECT_BONUS = 25;
+const NEGLECT_READY_MIN = 60; // only boost regions recovered enough to train
+
 /**
  * Score each muscle using multi-factor priority system.
  *
@@ -145,16 +152,44 @@ export function scoreExercises(exercises, muscleScores, availableEquipment = nul
  * cluster win on headcount even when its muscles are individually
  * lower priority. Average compares them fairly.
  *
+ * A cluster that is deeply under MEV and recovered gets a neglect boost so
+ * a completely untrained region outranks an imbalance correction elsewhere.
+ *
  * @param {Object.<string, {priority: number}>} muscleScores
- * @returns {Array<{name, muscles, sum, avg, score}>} sorted best-first
+ * @param {Object.<string, {sets, mev}>} [volMap] - per-muscle weekly volume status
+ * @param {Object.<string, {readiness}>} [readyMap] - per-muscle readiness
+ * @returns {Array<{name, muscles, sum, avg, neglect, score}>} sorted best-first
  */
-function scoreClusters(muscleScores) {
+function scoreClusters(muscleScores, volMap = null, readyMap = null) {
   const scored = Object.entries(MUSCLE_CLUSTERS).map(([name, muscles]) => {
     const sum = muscles.reduce((s, id) => s + (muscleScores[id]?.priority ?? 0), 0);
     const avg = muscles.length > 0 ? sum / muscles.length : 0;
-    return { name, muscles, sum: Math.round(sum * 10) / 10, avg: Math.round(avg * 10) / 10, score: avg };
+
+    // Neglect = mean per-muscle MEV deficit fraction, counting only muscles
+    // recovered enough to train. 1.0 = whole region at zero volume and ready.
+    let neglect = 0;
+    if (volMap && readyMap && muscles.length > 0) {
+      let acc = 0;
+      for (const id of muscles) {
+        const v = volMap[id];
+        const rdy = readyMap[id]?.readiness ?? 0;
+        if (v && rdy >= NEGLECT_READY_MIN && v.sets < v.mev && v.mev > 0) {
+          acc += Math.min(1, (v.mev - v.sets) / v.mev);
+        }
+      }
+      neglect = acc / muscles.length;
+    }
+
+    const score = avg + NEGLECT_BONUS * neglect;
+    return {
+      name, muscles,
+      sum: Math.round(sum * 10) / 10,
+      avg: Math.round(avg * 10) / 10,
+      neglect: Math.round(neglect * 100) / 100,
+      score: Math.round(score * 10) / 10,
+    };
   });
-  scored.sort((a, b) => b.avg - a.avg);
+  scored.sort((a, b) => b.score - a.score);
   return scored;
 }
 
@@ -372,7 +407,9 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   const todayStr = asOf.toISOString().slice(0, 10);
   const todaySets = allSets.filter((s) => s.date === todayStr);
   const detected = detectActiveCluster(todaySets, exercises, allSets);
-  const clusterRanking = scoreClusters(muscleScores);
+
+  const volMap = Object.fromEntries(volumeStatus.map((v) => [v.muscleId, v]));
+  const clusterRanking = scoreClusters(muscleScores, volMap, readiness.perMuscle);
   const scoredWinner = clusterRanking[0];
 
   let cluster;
@@ -381,9 +418,9 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
     cluster = detected;
     lock = 'firm';
   } else if (detected) {
-    const detectedAvg = clusterRanking.find((c) => c.name === detected.name)?.avg ?? 0;
+    const detectedScore = clusterRanking.find((c) => c.name === detected.name)?.score ?? 0;
     const override = scoredWinner.name !== detected.name
-      && scoredWinner.avg >= detectedAvg + SOFT_OVERRIDE_MARGIN;
+      && scoredWinner.score >= detectedScore + SOFT_OVERRIDE_MARGIN;
     cluster = override ? scoredWinner : detected;
     lock = override ? 'score-override' : 'soft-lock';
   } else {
@@ -436,7 +473,6 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   const dayActive = detected != null && cluster.name === detected.name;
 
   // Debug breakdown — why THIS day was chosen.
-  const volMap = Object.fromEntries(volumeStatus.map((v) => [v.muscleId, v]));
   const debug = {
     chosen: cluster.name,
     lock,
@@ -445,6 +481,8 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
       name: c.name,
       avg: c.avg,
       sum: c.sum,
+      neglect: c.neglect,
+      score: c.score,
       chosen: c.name === cluster.name,
       muscles: c.muscles.map((id) => ({
         id,

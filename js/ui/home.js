@@ -253,7 +253,7 @@ function renderWhyThisDay(debug, muscleNames) {
           <div>
             <div class="flex justify-between" style="font-weight:600;color:${c.chosen ? 'var(--accent)' : 'var(--text-secondary)'};">
               <span>${c.name}${c.chosen ? ' ✓' : ''}</span>
-              <span class="font-mono">avg ${c.avg} · sum ${c.sum}</span>
+              <span class="font-mono">score ${c.score} (avg ${c.avg}${c.neglect ? ` + neglect ${c.neglect}` : ''})</span>
             </div>
             <div class="flex flex-col gap-1 mt-1">
               ${c.muscles.map((m) => `

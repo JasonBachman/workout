@@ -124,6 +124,7 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
             </div>
           </div>
           ${renderSessionLoad(rec.sessionLoad, muscleNames)}
+          ${renderWhyThisDay(rec.debug, muscleNames)}
           <button class="btn btn-primary w-full mt-4" id="start-workout-btn">${rec.dayActive ? 'Continue Workout' : 'Start Workout'}</button>
         ` : `
           <div class="text-sm text-muted mt-2">
@@ -227,6 +228,46 @@ function render({ readiness, volumeStatus, balanceWarnings, rec, muscleNames, we
       location.hash = '#/log';
     });
   });
+}
+
+/**
+ * Diagnostic: why this day was chosen. Collapsed by default.
+ * Shows each cluster's average priority and the per-muscle breakdown.
+ */
+function renderWhyThisDay(debug, muscleNames) {
+  if (!debug) return '';
+
+  const lockText = {
+    firm: 'Locked — 2+ working sets logged today',
+    'soft-lock': 'Started today (1 set) — keeping this day',
+    'score-override': 'Started a day, but a more neglected day scored higher',
+    score: 'Chosen by score — nothing logged today yet',
+  }[debug.lock] ?? debug.lock;
+
+  return `
+    <details class="mt-3" style="font-size:var(--text-xs);">
+      <summary class="text-muted" style="cursor:pointer;">Why this day?</summary>
+      <div class="flex flex-col gap-3 mt-2">
+        <div class="text-muted">${lockText}.</div>
+        ${debug.clusters.map((c) => `
+          <div>
+            <div class="flex justify-between" style="font-weight:600;color:${c.chosen ? 'var(--accent)' : 'var(--text-secondary)'};">
+              <span>${c.name}${c.chosen ? ' ✓' : ''}</span>
+              <span class="font-mono">avg ${c.avg} · sum ${c.sum}</span>
+            </div>
+            <div class="flex flex-col gap-1 mt-1">
+              ${c.muscles.map((m) => `
+                <div class="flex justify-between text-muted">
+                  <span>${muscleNames[m.id] ?? m.id}</span>
+                  <span class="font-mono">pri ${m.priority} · rdy ${m.readiness ?? '–'} · ${m.sets}/${m.mev ?? '–'}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </details>
+  `;
 }
 
 /**

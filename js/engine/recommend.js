@@ -9,7 +9,7 @@
  * and returns each pick with a human-readable reason.
  */
 
-import { computeWeeklyVolume, evaluateVolume, filterToWindow } from './volume.js';
+import { computeWeeklyVolume, evaluateVolume, filterToWindow, filterEffectiveSets } from './volume.js';
 import { computeReadiness } from './readiness.js';
 import { computeMusclePriority, countMuscleSessionDays } from './priority.js';
 import { computeSessionVolume, sessionMuscleTarget } from './session.js';
@@ -33,6 +33,10 @@ const FLOATER_MUSCLES = ['abs'];
 
 // How many sets to allow from non-primary clusters (for critical deficits)
 const OFF_CLUSTER_MAX_SETS = 3;
+
+// On a soft start (1 working set today), how much better a different cluster's
+// average priority must be before we suggest switching off the started day.
+const SOFT_OVERRIDE_MARGIN = 10;
 
 /**
  * Score each muscle using multi-factor priority system.
@@ -134,20 +138,35 @@ export function scoreExercises(exercises, muscleScores, availableEquipment = nul
 }
 
 /**
- * Determine which muscle cluster should be today's theme.
- * Picks the cluster with the highest total muscle priority.
+ * Score every cluster by AVERAGE muscle priority (not sum).
+ *
+ * Averaging is essential: clusters have different muscle counts
+ * (pull has 6, push/lower have 4), so summing lets the bigger
+ * cluster win on headcount even when its muscles are individually
+ * lower priority. Average compares them fairly.
  *
  * @param {Object.<string, {priority: number}>} muscleScores
- * @returns {{name: string, muscles: string[], score: number}}
+ * @returns {Array<{name, muscles, sum, avg, score}>} sorted best-first
+ */
+function scoreClusters(muscleScores) {
+  const scored = Object.entries(MUSCLE_CLUSTERS).map(([name, muscles]) => {
+    const sum = muscles.reduce((s, id) => s + (muscleScores[id]?.priority ?? 0), 0);
+    const avg = muscles.length > 0 ? sum / muscles.length : 0;
+    return { name, muscles, sum: Math.round(sum * 10) / 10, avg: Math.round(avg * 10) / 10, score: avg };
+  });
+  scored.sort((a, b) => b.avg - a.avg);
+  return scored;
+}
+
+/**
+ * Determine which muscle cluster should be today's theme.
+ * Picks the cluster with the highest AVERAGE muscle priority.
+ *
+ * @param {Object.<string, {priority: number}>} muscleScores
+ * @returns {{name: string, muscles: string[], avg: number, sum: number}}
  */
 function pickCluster(muscleScores) {
-  const clusterScores = Object.entries(MUSCLE_CLUSTERS).map(([name, muscles]) => {
-    const score = muscles.reduce((sum, id) => sum + (muscleScores[id]?.priority ?? 0), 0);
-    return { name, muscles, score };
-  });
-
-  clusterScores.sort((a, b) => b.score - a.score);
-  return clusterScores[0];
+  return scoreClusters(muscleScores)[0];
 }
 
 /**
@@ -345,11 +364,32 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
     asOf,
   });
 
-  // 4. Pick cluster theme — sticky if already training today
+  // 4. Pick cluster theme.
+  //    - firm lock (>=2 working sets today): stay in that cluster, no flip.
+  //    - soft start (1 working set): keep it unless scoring points to a
+  //      clearly better, badly-neglected cluster by a real margin.
+  //    - nothing today: highest AVERAGE-priority cluster wins.
   const todayStr = asOf.toISOString().slice(0, 10);
   const todaySets = allSets.filter((s) => s.date === todayStr);
-  const activeCluster = detectActiveCluster(todaySets, exercises);
-  const cluster = activeCluster ?? pickCluster(muscleScores);
+  const detected = detectActiveCluster(todaySets, exercises, allSets);
+  const clusterRanking = scoreClusters(muscleScores);
+  const scoredWinner = clusterRanking[0];
+
+  let cluster;
+  let lock; // 'firm' | 'soft-lock' | 'score-override' | 'score'
+  if (detected?.firm) {
+    cluster = detected;
+    lock = 'firm';
+  } else if (detected) {
+    const detectedAvg = clusterRanking.find((c) => c.name === detected.name)?.avg ?? 0;
+    const override = scoredWinner.name !== detected.name
+      && scoredWinner.avg >= detectedAvg + SOFT_OVERRIDE_MARGIN;
+    cluster = override ? scoredWinner : detected;
+    lock = override ? 'score-override' : 'soft-lock';
+  } else {
+    cluster = scoredWinner;
+    lock = 'score';
+  }
 
   // 5. Session-awareness: assume the user finishes this day. Compute a
   // balanced per-muscle target, subtract what's already done today, and
@@ -392,32 +432,62 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
 
   const clusterLabels = { push: 'Push', pull: 'Pull', lower: 'Lower Body' };
   const sessionFocus = clusterLabels[cluster.name] ?? cluster.name;
-  const dayActive = activeCluster !== null;
+  // A day is "active" only when we're honoring what was started today.
+  const dayActive = detected != null && cluster.name === detected.name;
 
-  return { picks, volumeStatus, readiness, totalSets, sessionFocus, sessionLoad, dayActive };
+  // Debug breakdown — why THIS day was chosen.
+  const volMap = Object.fromEntries(volumeStatus.map((v) => [v.muscleId, v]));
+  const debug = {
+    chosen: cluster.name,
+    lock,
+    startedToday: detected ? { name: detected.name, workingSets: detected.count } : null,
+    clusters: clusterRanking.map((c) => ({
+      name: c.name,
+      avg: c.avg,
+      sum: c.sum,
+      chosen: c.name === cluster.name,
+      muscles: c.muscles.map((id) => ({
+        id,
+        priority: Math.round((muscleScores[id]?.priority ?? 0) * 10) / 10,
+        readiness: readiness.perMuscle[id]?.readiness ?? null,
+        sets: volMap[id]?.sets ?? 0,
+        mev: volMap[id]?.mev ?? null,
+      })),
+    })),
+  };
+
+  return { picks, volumeStatus, readiness, totalSets, sessionFocus, sessionLoad, dayActive, debug };
 }
 
+// A day is "firmly" underway (hard-locked, no flipping) once this many
+// working sets match a cluster. A single working set is a soft start:
+// it counts today's sets but still lets scoring steer you to a badly
+// neglected day, so one stray set can't trap you on the wrong split.
+const FIRM_LOCK_SETS = 2;
+
 /**
- * Detect which cluster the user has already started training today.
- * Returns the cluster if a clear majority of today's sets match it,
- * or null if no sets logged today.
+ * Detect which cluster the user has already started training today,
+ * ignoring warm-ups (only working sets count).
+ *
+ * @returns {{name, muscles, count, firm}|null}
+ *   firm=true  → hard-locked, recommendations stay in this cluster.
+ *   firm=false → soft start (1 working set); caller may still override
+ *                toward a higher-scoring, badly-neglected cluster.
  */
-function detectActiveCluster(todaySets, exercises) {
-  if (todaySets.length === 0) return null;
+function detectActiveCluster(todaySets, exercises, allSets) {
+  const working = filterEffectiveSets(todaySets, allSets ?? todaySets);
+  if (working.length === 0) return null;
 
   const exMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
 
-  // Count how many sets belong to each cluster
   const clusterCounts = {};
-  for (const [name, muscles] of Object.entries(MUSCLE_CLUSTERS)) {
-    clusterCounts[name] = 0;
-  }
+  for (const name of Object.keys(MUSCLE_CLUSTERS)) clusterCounts[name] = 0;
 
-  for (const s of todaySets) {
+  for (const s of working) {
     const ex = exMap[s.exerciseId];
     if (!ex) continue;
 
-    // Find which cluster this exercise's top muscle belongs to
+    // Which cluster does this exercise's top muscle belong to?
     let topMuscle = null;
     let topFraction = 0;
     for (const [muscleId, fraction] of Object.entries(ex.muscles)) {
@@ -435,15 +505,9 @@ function detectActiveCluster(todaySets, exercises) {
     }
   }
 
-  // Pick the cluster with the most sets — a single logged set locks the day
-  // so recommendations stop drifting the moment a session starts.
-  const sorted = Object.entries(clusterCounts)
-    .sort(([, a], [, b]) => b - a);
+  const sorted = Object.entries(clusterCounts).sort(([, a], [, b]) => b - a);
+  const [name, count] = sorted[0];
+  if (count < 1) return null;
 
-  if (sorted[0][1] >= 1) {
-    const name = sorted[0][0];
-    return { name, muscles: MUSCLE_CLUSTERS[name], score: 0 };
-  }
-
-  return null;
+  return { name, muscles: MUSCLE_CLUSTERS[name], count, firm: count >= FIRM_LOCK_SETS };
 }

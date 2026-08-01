@@ -38,6 +38,10 @@ const OFF_CLUSTER_MAX_SETS = 3;
 // average priority must be before we suggest switching off the started day.
 const SOFT_OVERRIDE_MARGIN = 10;
 
+// Below this readiness a muscle is "fatigued" (matches the body map's red and
+// the readiness gate cutoff): don't target or recommend more work on it today.
+const MIN_TRAIN_READINESS = 40;
+
 // Neglect boost: a whole region that is deeply under MEV *and* recovered is
 // the strongest training opportunity and should outrank an imbalance
 // correction (e.g. untrained legs beat a recovering-but-lagging pull day).
@@ -440,8 +444,12 @@ export function recommend({ sets: allSets, exercises, muscles, landmarks }, opti
   for (const muscleId of dayMuscles) {
     const lm = landmarkMap[muscleId];
     if (!lm) continue;
-    const target = sessionMuscleTarget(muscleId, lm.mav);
     const done = doneVolume[muscleId]?.sets ?? 0;
+    const rdy = readiness.perMuscle[muscleId]?.readiness ?? 100;
+    // Skip fatigued muscles (consistent with the body map) unless already
+    // worked today — don't recommend more load on something that needs rest.
+    if (rdy < MIN_TRAIN_READINESS && done === 0) continue;
+    const target = sessionMuscleTarget(muscleId, lm.mav);
     sessionNeed[muscleId] = Math.max(0, target - done);
     sessionLoad.push({ muscleId, done: Math.round(done * 10) / 10, planned: 0, target });
   }

@@ -271,14 +271,15 @@ function renderWhyThisDay(debug, muscleNames) {
 }
 
 /**
- * Per-muscle set load for the day's cluster: how the completed +
- * planned sets stack up against a balanced per-session target.
+ * Per-muscle set load for the day's cluster: sets already done (green)
+ * against the balanced per-session target; the blank remainder is what's
+ * left to do.
  */
 function renderSessionLoad(sessionLoad, muscleNames) {
   if (!sessionLoad || sessionLoad.length === 0) return '';
 
-  // Only show muscles this day actually touches (target or activity).
-  const rows = sessionLoad.filter((r) => r.done > 0 || r.planned > 0);
+  // Show every muscle this day targets — green = sets done, blank = still to do.
+  const rows = sessionLoad.filter((r) => r.target > 0);
   if (rows.length === 0) return '';
 
   return `
@@ -286,18 +287,15 @@ function renderSessionLoad(sessionLoad, muscleNames) {
       <div class="text-sm text-muted" style="font-weight:600;">Set load this day</div>
       ${rows.map((r) => {
         const name = muscleNames[r.muscleId] ?? r.muscleId;
-        const total = Math.round((r.done + r.planned) * 10) / 10;
-        const pct = r.target > 0 ? Math.min(100, (total / r.target) * 100) : 0;
-        const donePct = r.target > 0 ? Math.min(100, (r.done / r.target) * 100) : 0;
+        const donePct = Math.min(100, (r.done / r.target) * 100);
         return `
           <div>
             <div class="flex justify-between" style="font-size:var(--text-xs);color:var(--text-secondary);">
               <span>${name}</span>
-              <span class="font-mono">${r.done > 0 ? `${r.done} done + ${r.planned} planned` : `${r.planned} planned`} / ${r.target}</span>
+              <span class="font-mono">${r.done} / ${r.target}</span>
             </div>
-            <div class="progress" style="height:4px;position:relative;">
-              <div class="progress-fill" style="width:${pct}%;background:var(--recovering);"></div>
-              <div class="progress-fill" style="width:${donePct}%;background:var(--ready);position:absolute;top:0;left:0;"></div>
+            <div class="progress" style="height:4px;">
+              <div class="progress-fill" style="width:${donePct}%;background:var(--ready);"></div>
             </div>
           </div>
         `;
